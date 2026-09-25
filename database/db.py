@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS tournaments (
     max_teams INTEGER DEFAULT 12,
     entry_fee REAL DEFAULT 0,
     prize_pool REAL DEFAULT 0,
+    banner_url TEXT DEFAULT '',
     created_by INTEGER,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -54,13 +55,14 @@ CREATE TABLE IF NOT EXISTS registrations (
 
 
 CREATE TABLE IF NOT EXISTS team_members (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     team_id INTEGER NOT NULL,
-    user_id INTEGER NOT NULL,
-    ign TEXT,
-    uid TEXT,
+    user_id INTEGER DEFAULT 0,
+    ign TEXT NOT NULL,
+    uid TEXT NOT NULL,
     role TEXT DEFAULT 'Player',
-
-    PRIMARY KEY (team_id, user_id),
+    is_sub INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
 
     FOREIGN KEY (team_id)
         REFERENCES teams(id)
@@ -199,6 +201,21 @@ async def init_db():
         await db.executescript(
             SCHEMA
         )
+
+        # Migration: ensure banner_url column exists in tournaments table
+        try:
+            await db.execute("ALTER TABLE tournaments ADD COLUMN banner_url TEXT DEFAULT ''")
+        except Exception:
+            pass
+
+        # Migration: ensure team_members has id and is_sub
+        try:
+            cur = await db.execute("PRAGMA table_info(team_members)")
+            cols = [r[1] for r in await cur.fetchall()]
+            if "is_sub" not in cols:
+                await db.execute("ALTER TABLE team_members ADD COLUMN is_sub INTEGER DEFAULT 0")
+        except Exception:
+            pass
 
         await db.commit()
 
