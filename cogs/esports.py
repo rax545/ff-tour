@@ -9,6 +9,7 @@ from services.leaderboard import leaderboard
 from utils.banner import generate_tournament_banner, generate_match_banner
 from utils.embeds import base, ok, err, og_match_dm_embed, og_room_dm_embed
 from utils.permissions import require_staff
+from utils.cards import room_pass, points_table, booyah, mvp
 from views.panels import TournamentPanel
 
 ROLE_CHOICES = [
@@ -1226,6 +1227,7 @@ class Esports(commands.Cog):
         await db.close()
 
         # Send OG DMs to squad members
+        banner_bytes = generate_match_banner(tournament["name"], match_no, map_name, scheduled_at, SERVER_NAME).getvalue()
         dms_sent = 0
         dms_failed = 0
 
@@ -1259,7 +1261,9 @@ class Esports(commands.Cog):
                                 f"⚔️ Attention Warriors of **{team_info['name']} [{team_info['tag']}]**! "
                                 f"**Match #{match_no}** has been scheduled."
                             ),
-                            embed=dm_embed
+                            embed=dm_embed,
+                            files=[discord.File(__import__('io').BytesIO(banner_bytes), filename="match_banner.png"),
+                                   discord.File(room_pass(team_info['name'], tournament['name'], match_no, map_name), filename="vip_pass.png")]
                         )
                         dms_sent += 1
                     except discord.Forbidden:
@@ -1451,7 +1455,9 @@ class Esports(commands.Cog):
                             f"🚨 **[ {SERVER_NAME} • ROOM PASS ]** 🚨\n"
                             f"Squad **{tm['name']} [{tm['tag']}]**, custom room credentials released!"
                         ),
-                        embed=dm_embed
+                        embed=dm_embed,
+                        files=[discord.File(generate_match_banner(match['tournament_name'], match['match_no'], match['map'] or 'TBA', 'ROOM OPEN', SERVER_NAME), filename="match_banner.png"),
+                               discord.File(room_pass(tm['name'], match['tournament_name'], match['match_no'], match['map'] or 'TBA'), filename="vip_pass.png")]
                     )
                     sent += 1
                 except discord.Forbidden:
@@ -1472,8 +1478,7 @@ class Esports(commands.Cog):
         embed.add_field(name="🏆 Tournament", value=f"**{match['tournament_name']}**", inline=True)
         embed.add_field(name="🎮 Match Round", value=f"**Match #{match['match_no']}**", inline=True)
         embed.add_field(name="🗺️ Map", value=f"**{match['map'] or 'TBA'}**", inline=True)
-        embed.add_field(name="🔑 Room ID", value=f"`{room_id}`", inline=True)
-        embed.add_field(name="🔐 Password", value=f"`{password}`", inline=True)
+        embed.add_field(name="🔐 Access", value="Credentials sent privately to captains.", inline=False)
         embed.add_field(name="🐺 Host", value=f"**{SERVER_NAME}**", inline=True)
         embed.add_field(
             name="📨 Delivery Report",
@@ -1768,6 +1773,103 @@ class Esports(commands.Cog):
         await interaction.response.send_message(
             embed=embed
         )
+
+
+    @tournament.command(name="slots", description="Show registered lobby slots")
+    async def slots(self, interaction: discord.Interaction, tournament_id: int, page: int = 1):
+        if page < 1 or tournament_id < 1:
+            return await interaction.response.send_message(embed=err("Invalid tournament or page."), ephemeral=True)
+        db = await connect()
+        try:
+            cur = await db.execute("SELECT name, max_teams FROM tournaments WHERE id=?", (tournament_id,))
+            tournament = await cur.fetchone()
+            if not tournament:
+                return await interaction.response.send_message(embed=err("Tournament not found."), ephemeral=True)
+            cur = await db.execute("""SELECT DISTINCT id, name, tag FROM teams WHERE tournament_id=?
+                UNION SELECT DISTINCT t.id, t.name, t.tag FROM teams t
+                JOIN registrations r ON r.team_id=t.id WHERE r.tournament_id=? ORDER BY id""",
+                (tournament_id, tournament_id))
+            teams = await cur.fetchall()
+        finally:
+            await db.close()
+        start = (page - 1) * 40 + 1
+        end = min(page * 40, tournament["max_teams"])
+        if start > tournament["max_teams"]:
+            return await interaction.response.send_message(embed=err("Page has no slots."), ephemeral=True)
+        lines = [f"`{i:02d}` {teams[i-1]['name']} [{teams[i-1]['tag']}]" if i <= len(teams) else f"`{i:02d}` — OPEN —" for i in range(start, end + 1)]
+        embed = base(f"Lobby Slots • {tournament['name']}", "\n".join(lines)[:3900] or "No slots available.")
+        await interaction.response.send_message(embed=embed)
+
+    @tournament.command(name="rules", description="Show tournament rulebook")
+    async def rules(self, interaction: discord.Interaction):
+        embed = base("Tournament Rulebook", "1. Register one squad per tournament; use your registered roster.\n"
+                     "2. Join before the scheduled start; follow host announcements.\n"
+                     "3. No cheats, exploits, teaming or abusive behavior.\n"
+                     "4. Submit accurate results; only verified results count.\n"
+                     "5. Staff resolve disputes; provide evidence when reporting.")
+        await interaction.response.send_message(embed=embed)
+
+    @result.command(name="table", description="Generate a 1200x880 verified points table")
+    async def table(self, interaction: discord.Interaction, tournament_id: int, page: int = 1):
+        if page < 1 or tournament_id < 1:
+            return await interaction.response.send_message(embed=err("Invalid tournament or page."), ephemeral=True)
+        await interaction.response.defer()
+        db = await connect()
+        try:
+            cur = await db.execute("SELECT name FROM tournaments WHERE id=?", (tournament_id,))
+            tournament = await cur.fetchone()
+        finally:
+            await db.close()
+        if not tournament:
+            return await interaction.followup.send(embed=err("Tournament not found."), ephemeral=True)
+        rows = await leaderboard(tournament_id)
+        if not rows:
+            return await interaction.followup.send(embed=err("No teams registered."), ephemeral=True)
+        if (page - 1) * 12 >= len(rows):
+            return await interaction.followup.send(embed=err("Page has no teams."), ephemeral=True)
+        await interaction.followup.send(file=discord.File(points_table(tournament['name'], rows[(page-1)*12:page*12], page), filename="points_table.png"))
+
+    @result.command(name="booyah", description="Generate a golden winner card from verified standings")
+    async def winner_card(self, interaction: discord.Interaction, tournament_id: int):
+        if tournament_id < 1:
+            return await interaction.response.send_message(embed=err("Invalid tournament ID."), ephemeral=True)
+        await interaction.response.defer()
+        db = await connect()
+        try:
+            cur = await db.execute("SELECT name FROM tournaments WHERE id=?", (tournament_id,))
+            tournament = await cur.fetchone()
+        finally:
+            await db.close()
+        if not tournament:
+            return await interaction.followup.send(embed=err("Tournament not found."), ephemeral=True)
+        rows = await leaderboard(tournament_id)
+        ranked = [r for r in rows if r['matches'] > 0]
+        if not ranked:
+            return await interaction.followup.send(embed=err("No verified results yet."), ephemeral=True)
+        top = ranked[0]
+        await interaction.followup.send(file=discord.File(booyah(top['name'], tournament['name'], top['pts']), filename="booyah.png"))
+
+    @result.command(name="mvp", description="Generate a cyberpunk MVP card from verified kills")
+    async def mvp_card(self, interaction: discord.Interaction, tournament_id: int):
+        if tournament_id < 1:
+            return await interaction.response.send_message(embed=err("Invalid tournament ID."), ephemeral=True)
+        await interaction.response.defer()
+        db = await connect()
+        try:
+            cur = await db.execute("""SELECT tm.ign, t.name AS team, SUM(r.kills) AS kills
+                FROM results r JOIN matches m ON m.id=r.match_id
+                JOIN teams t ON t.id=r.team_id
+                JOIN team_members tm ON tm.team_id=t.id AND tm.is_sub=0
+                WHERE m.tournament_id=? AND r.verified=1
+                GROUP BY tm.id ORDER BY kills DESC, tm.ign ASC LIMIT 1""", (tournament_id,))
+            player = await cur.fetchone()
+        finally:
+            await db.close()
+        if not player:
+            return await interaction.followup.send(embed=err("No verified results yet."), ephemeral=True)
+        # Results track team kills, not individual kills; label the value accordingly.
+        await interaction.followup.send(file=discord.File(mvp(player['ign'], player['team'], player['kills']), filename="mvp.png"),
+                                        content="Featured player from the top-kill team; individual kills are not tracked.")
 
 
 # =============================================================

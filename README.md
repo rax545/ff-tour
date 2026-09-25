@@ -50,3 +50,10 @@ python bot.py
 6. **Captains:** Run `/result submit` after the match.
 7. **Staff:** Run `/result verify` to approve points.
 8. **Everyone:** Run `/result leaderboard` to view verified standings.
+
+### Graphics and slash commands
+- `/match create` sends each registered captain/player a match banner and team-specific VIP pass by DM; `/match room` sends captains updated banners/passes and private room credentials. Failed/closed DMs are counted in the delivery report. Room credentials are not printed on the pass.
+- `/result table tournament_id [page]` generates a 1200×880 verified standings graphic (12 teams per page). `/result booyah tournament_id` generates a 1100×500 golden winner card from verified results.
+- `/result mvp tournament_id` generates a cyberpunk featured-player card. **Individual kills are not recorded** in the current schema; this displays a player from the team with the most verified team kills, not a statistically verified individual MVP.
+- `/tournament slots tournament_id [page]` lists lobby slots (40 per page); `/tournament rules` shows the rulebook.
+- `ADMIN_ROLE_ID` accepts comma-separated IDs, e.g. `123,456`. The bot token is read from the first nonempty of `DISCORD_TOKEN`, `BOT_TOKEN`, `TOKEN` (in that order). Set these only in the environment or `.env`, never commit tokens.

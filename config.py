@@ -3,9 +3,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-TOKEN = os.getenv('DISCORD_TOKEN', '')
+TOKEN = next((os.getenv(key, '').strip() for key in ('DISCORD_TOKEN', 'BOT_TOKEN', 'TOKEN') if os.getenv(key, '').strip()), '')
 GUILD_ID = int(os.getenv('GUILD_ID', '0') or 0)
-ADMIN_ROLE_ID = int(os.getenv('ADMIN_ROLE_ID', '0') or 0)
+ADMIN_ROLE_ID = tuple(int(value.strip()) for value in os.getenv('ADMIN_ROLE_ID', '').split(',') if value.strip())
 MANAGER_ROLE_ID = int(os.getenv('MANAGER_ROLE_ID', '0') or 0)
 DATABASE_PATH = os.getenv('DATABASE_PATH', 'data/esports.sqlite3')
 KILL_POINT = int(os.getenv('KILL_POINT', '1') or 1)

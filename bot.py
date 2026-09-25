@@ -43,14 +43,14 @@ class EsportsBot(commands.Bot):
         logger.info("ONLINE: %s (ID: %s)", self.user, self.user.id)
         activity = discord.Activity(
             type=discord.ActivityType.competing,
-            name=f"Free Fire • {SERVER_NAME}"
+            name="Developed by Joy"
         )
         await self.change_presence(status=discord.Status.online, activity=activity)
 
 
 async def main():
     if not TOKEN:
-        raise RuntimeError("DISCORD_TOKEN missing in .env")
+        raise RuntimeError("Bot token missing (DISCORD_TOKEN, BOT_TOKEN or TOKEN)")
     async with EsportsBot() as bot:
         await bot.start(TOKEN)
 
