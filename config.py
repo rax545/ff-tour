@@ -51,11 +51,10 @@ DATABASE_PATH = os.getenv('DATABASE_PATH', 'data/esports.sqlite3')
 KILL_POINT = int(os.getenv('KILL_POINT', '1') or 1)
 PLACEMENT_POINTS = {1: 12, 2: 9, 3: 8, 4: 7, 5: 6, 6: 5, 7: 4, 8: 3, 9: 2, 10: 1}
 
-# সার্ভার ব্র্যান্ডিং - 𝐖𝐡𝐢𝐭𝐞 𝐖𝐨𝐥𝐟 𝐆𝐥𝐨𝐛𝐚𝐥
-SERVER_NAME = os.getenv('SERVER_NAME', '𝐖𝐡𝐢𝐭𝐞 𝐖𝐨𝐥𝐟 𝐆𝐥𝐨𝐛𝐚𝐥')
-BRAND = os.getenv('BRAND', '𝐖𝐡𝐢𝐭𝐞 𝐖𝐨𝐥𝐟 𝐆𝐥𝐨𝐛𝐚𝐥')
-SERVER_NAME_CLEAN = 'WHITE WOLF GLOBAL'
-TAGLINE = 'Elite Free Fire Esports League'
+# সার্ভার ব্র্যান্ডিং - Root LU (Leading University)
+SERVER_NAME = os.getenv('SERVER_NAME', 'Root LU')
+BRAND = os.getenv('BRAND', 'Root LU')
+SERVER_NAME_CLEAN = os.getenv('SERVER_NAME_CLEAN', 'Root LU')
+TAGLINE = 'Leading University Free Fire Esports League'
 
-# 🔥 এই লাইনটির জন্য এরর দিচ্ছিল (এখন ফিক্সড):
 DEVELOPER = os.getenv('DEVELOPER', 'Joy')

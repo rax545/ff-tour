@@ -109,11 +109,15 @@ class TournamentPanel(discord.ui.View):
             cur = await db.execute(
                 """
                 SELECT DISTINCT t.id, t.name, t.tag, t.captain_id,
+                       COALESCE(t.batch, '') AS batch,
+                       COALESCE(t.section, '') AS section,
                        (SELECT COUNT(*) FROM team_members WHERE team_id=t.id) AS m_count
                 FROM teams t
                 WHERE t.tournament_id=?
                 UNION
                 SELECT DISTINCT t.id, t.name, t.tag, t.captain_id,
+                       COALESCE(t.batch, '') AS batch,
+                       COALESCE(t.section, '') AS section,
                        (SELECT COUNT(*) FROM team_members WHERE team_id=t.id) AS m_count
                 FROM teams t
                 JOIN registrations r ON t.id = r.team_id
@@ -139,8 +143,9 @@ class TournamentPanel(discord.ui.View):
         team_lines = []
         for i, team in enumerate(teams, start=1):
             count_str = f"`{team['m_count']}/5 Players`" if team["m_count"] else "`Lineup Pending`"
+            batch_tag = f" • `Batch {team['batch']}-{team['section']}`" if team["batch"] and team["section"] else ""
             team_lines.append(
-                f"`#{i:02d}` **{team['name']}** `[{team['tag']}]` • {count_str} • Captain: <@{team['captain_id']}>"
+                f"`#{i:02d}` **{team['name']}** `[{team['tag']}]`{batch_tag} • {count_str} • Captain: <@{team['captain_id']}>"
             )
 
         embed = base(
