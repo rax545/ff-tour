@@ -1,22 +1,29 @@
-# 🐺 WHITE WOLF GLOBAL — Free Fire Esports Tournament Bot (Premium Edition)
+# 🐺 Root LU — Free Fire Esports Tournament Bot (Leading University Edition)
 
-A high-end, production-grade Free Fire esports tournament Discord management bot designed for **𝐖𝐡𝐢𝐭𝐞 𝐖𝐨𝐥𝐟 𝐆𝐥𝐨𝐛𝐚𝐥**. Features dynamic PIL tournament banner generation, automated OG battle dispatch DMs to team captains and squads, custom room credentials delivery, interactive registration panels with buttons and modals, result verification, and verified live leaderboards.
+A high-end, production-grade Free Fire esports tournament Discord management bot customized for Leading University's **Root LU** community. Features CSE batch & section rankings, official student ID verification, individual fragger tracking & MVP rankings, match fixtures with official 5-map rotation, dynamic tournament banners, automated match dispatch DMs, custom room credential delivery, interactive registration panels, and real-time verified leaderboards.
 
-## ✨ Premium Features
-- 🐺 **Dynamic Tournament Banners:** Beautiful, high-resolution esports banners auto-generated via Pillow (PIL) featuring server branding (**𝐖𝐡𝐢𝐭𝐞 𝐖𝐨𝐥𝐟 𝐆𝐥𝐨𝐛𝐚𝐥**), tournament title, prize pool, squad slots, entry fee, and custom low-poly wolf emblems.
-- 👥 **Full 4+1 Squad Lineups & Roles:** Register complete 4-player active rosters + 1 optional 5th player (Extra Substitute) in a single command (`/team create`) or add them individually (`/team addplayer`). Supports official Free Fire roles:
-  - 👑 **IGL** (In-Game Leader / Captain)
-  - ⚡ **Rusher** (Entry Fragger)
-  - 🎯 **Sniper** (Marksman)
-  - 💥 **Assaulter** (Main Damage Dealer)
-  - 🛡️ **Support** (Utility / Medic)
-  - 🔄 **Substitute** (5th Player / Extra)
-- ⚡ **OG Squad Match Dispatches:** Creating a match via `/match create` automatically delivers a personalized, ultra-sleek OG battle dispatch message and embed to the DMs of all registered squads, including their specific team name, complete 4+1 roster breakdown with roles & UIDs, tournament name, map, and scheduled time.
-- 🔑 **OG Room Credentials Release:** Releasing room credentials via `/match room` sends an OG access pass directly to team captains' DMs with copy-friendly Room ID and Password codeblocks.
-- 🏆 **Interactive Tournament Panels:** Sleek Discord Views featuring **Register Squad** modal, **Tournament Info** with live progress bars, and **Registered Squads** list with live lineup status.
-- 📊 **Scoring & Verification:** Captains submit match placements and kills, staff verifies results, and live point tables update in real time.
-- 🛡️ **Admin Command Center:** Real-time database statistics, quick actions, payment approval/rejection workflows, and audit logging.
-- 🎫 **Private Esports Support Tickets:** Automated ticket channel creation with strict permission overwrites.
+## ✨ Features & Capabilities
+
+### 🎓 Leading University & CSE Features
+- 🏆 **`/section leaderboard [tournament_id]` — CSE Batch & Section Points Table:** Real-time point tables and rankings aggregated across CSE batches (e.g. Batch 60, 59, 58) and sections (A, B, C, D) with total points, kills, squad counts, and top squad highlights.
+- 🎓 **`/student verify` & `/student profile` — Student ID Verification:** Official Leading University Student ID verification system with department, batch, and section validation, uniqueness constraints, and verified role assignment.
+- 🔥 **`/result topfraggers [tournament_id] [limit]` — Tournament Top Fraggers & MVP:** Comprehensive individual kill rankings showcasing the most lethal fraggers across verified matches, highlighting the tournament MVP / Terminator.
+- 🗓️ **`/tournament fixtures <tournament_id>` — Match Fixtures & 5-Map Rotation:** Complete match schedule and official 5-map Battle Royale rotation order:
+  1. 🏝️ **Bermuda** (Classic Battle Royale)
+  2. 🌋 **Purgatory** (High-Ground Elevation & Sniping)
+  3. 🏜️ **Kalahari** (Desert Tactical Combat)
+  4. ❄️ **Alpine** (Snow Terrain & Multi-Elevation)
+  5. ⚡ **NexTerra** (Futuristic Battlefield & Anti-Gravity Zones)
+- 👥 **`/team create` with Batch & Section Support:** Register squads with `batch` and `section` metadata (with automatic autofill from verified student profiles).
+
+### 🐺 Tournament & Esports Core Features
+- 🐺 **Dynamic Tournament Banners:** High-resolution banners auto-generated via Pillow (PIL) featuring server branding (**Root LU**), tournament title, prize pool, squad slots, entry fee, and wolf crests.
+- 👥 **Full 4+1 Squad Lineups & Roles:** Register complete 4-player active rosters + 1 optional 5th player (Extra Substitute) with official Free Fire roles (IGL, Rusher, Sniper, Assaulter, Support, Substitute).
+- ⚡ **OG Squad Match Dispatches:** `/match create` automatically delivers personalized OG battle notice DMs to all registered squad captains and members with team names, 4+1 roster breakdown, map, and schedule.
+- 🔑 **OG Room Credentials Release:** `/match room` sends copyable Room ID & Password directly to captains' DMs with access passes.
+- 📊 **Scoring & Verification:** Captains submit match placements and kills (`/result submit`), staff verifies scores (`/result verify`), and standings update live.
+- 🛡️ **Admin Command Center:** `/admin dashboard`, payment approval/rejection workflows, and audit logging.
+- 🎫 **Support Tickets:** `/ticket` creates private text channels for tournament inquiries and dispute resolution.
 
 ## 🚀 Installation & Setup
 Python 3.11+ is recommended.
@@ -25,14 +32,14 @@ Python 3.11+ is recommended.
 pip install -r requirements.txt
 ```
 
-Configure your environment variables in `.env`:
+Configure environment variables in `.env`:
 ```env
 DISCORD_TOKEN=your_bot_token_here
 GUILD_ID=your_guild_id_here
 ADMIN_ROLE_ID=your_admin_role_id_here
 MANAGER_ROLE_ID=your_manager_role_id_here
-SERVER_NAME=𝐖𝐡𝐢𝐭𝐞 𝐖𝐨𝐥𝐟 𝐆𝐥𝐨𝐛𝐚𝐥
-BRAND=𝐖𝐡𝐢𝐭𝐞 𝐖𝐨𝐥𝐟 𝐆𝐥𝐨𝐛𝐚𝐥
+SERVER_NAME=Root LU
+BRAND=Root LU
 DATABASE_PATH=data/esports.sqlite3
 ```
 
@@ -41,19 +48,35 @@ Start the bot:
 python bot.py
 ```
 
-## 📋 Esports Tournament Workflow
-1. **Staff:** Run `/tournament create` — Generates a dynamic branded banner and publishes the interactive squad registration panel.
-2. **Captains:** Run `/team create` and `/team addplayer` to build their 4-man roster.
-3. **Captains:** Click **🏆 Register Squad** on the tournament panel and input their Team ID.
-4. **Staff:** Run `/match create` — Generates a match banner and blasts personalized OG match notice DMs to all registered squad captains/members with their team name and **𝐖𝐡𝐢𝐭𝐞 𝐖𝐨𝐥𝐟 𝐆𝐥𝐨𝐛𝐚𝐥** branding!
-5. **Staff:** Run `/match room` — Automatically delivers copyable Room ID & Password to captains via OG DM.
-6. **Captains:** Run `/result submit` after the match.
-7. **Staff:** Run `/result verify` to approve points.
-8. **Everyone:** Run `/result leaderboard` to view verified standings.
+## 📋 Slash Commands Overview
 
-### Graphics and slash commands
-- `/match create` sends each registered captain/player a match banner and team-specific VIP pass by DM; `/match room` sends captains updated banners/passes and private room credentials. Failed/closed DMs are counted in the delivery report. Room credentials are not printed on the pass.
-- `/result table tournament_id [page]` generates a 1200×880 verified standings graphic (12 teams per page). `/result booyah tournament_id` generates a 1100×500 golden winner card from verified results.
-- `/result mvp tournament_id` generates a cyberpunk featured-player card. **Individual kills are not recorded** in the current schema; this displays a player from the team with the most verified team kills, not a statistically verified individual MVP.
-- `/tournament slots tournament_id [page]` lists lobby slots (40 per page); `/tournament rules` shows the rulebook.
-- `ADMIN_ROLE_ID` accepts comma-separated IDs, e.g. `123,456`. The bot token is read from the first nonempty of `DISCORD_TOKEN`, `BOT_TOKEN`, `TOKEN` (in that order). Set these only in the environment or `.env`, never commit tokens.
+### 🏛️ Section & Student Commands
+- `/section leaderboard [tournament_id]` — Show CSE Batch & Section point tables and rankings.
+- `/student verify <student_id> <name> <batch> <section> [department]` — Verify official Student ID.
+- `/student profile [member]` — View verified student profile and team affiliations.
+
+### 🏆 Tournament Commands
+- `/tournament create <name> <max_teams> [entry_fee] [prize_pool] [description]` — Create and publish tournament panel.
+- `/tournament fixtures <tournament_id>` — View match fixtures and 5-map rotation schedule.
+- `/tournament list` — List all active tournaments.
+- `/tournament slots <tournament_id> [page]` — Show registered lobby slots.
+- `/tournament rules` — Display tournament rulebook.
+- `/tournament close <tournament_id>` — Close registration.
+
+### 🛡️ Team Commands
+- `/team create <tournament_id> <name> <tag> <captain_ign> <captain_uid> [batch] [section] ...` — Register full 4+1 squad with batch & section.
+- `/team roster <team_id>` — View squad roster, roles, UIDs, batch & section.
+- `/team addplayer <team_id> <ign> <uid> [role] [member] [is_substitute]` — Add starter or substitute.
+
+### 🎮 Match Commands
+- `/match create <tournament_id> <match_no> <map_name> [scheduled_at]` — Create match & dispatch DMs.
+- `/match room <match_id> <room_id> <password>` — Release room credentials to captains.
+
+### 📊 Result Commands
+- `/result submit <match_id> <team_id> <placement> <kills>` — Submit squad match result.
+- `/result verify <result_id>` — Verify match score.
+- `/result leaderboard <tournament_id>` — Show verified squad leaderboard.
+- `/result topfraggers [tournament_id] [limit]` — Show top individual kill fraggers & MVP.
+- `/result table <tournament_id> [page]` — Generate 1200x880 graphical points table.
+- `/result booyah <tournament_id>` — Generate golden Booyah winner card.
+- `/result mvp <tournament_id>` — Generate cyberpunk MVP card.

@@ -5,12 +5,20 @@ from discord import app_commands
 from config import SERVER_NAME, BRAND
 from database.db import connect, audit
 from services.scoring import calculate
-from services.leaderboard import leaderboard
+from services.leaderboard import leaderboard, section_leaderboard, top_fraggers
 from utils.banner import generate_tournament_banner, generate_match_banner
 from utils.embeds import base, ok, err, og_match_dm_embed, og_room_dm_embed
 from utils.permissions import require_staff
 from utils.cards import room_pass, points_table, booyah, mvp
 from views.panels import TournamentPanel
+
+OFFICIAL_5_MAP_ROTATION = [
+    (1, "Bermuda", "🏝️", "Classic Battle Royale & Close-Quarter Combat"),
+    (2, "Purgatory", "🌋", "High-Ground Elevation & Long-Range Sniping"),
+    (3, "Kalahari", "🏜️", "Fast-Paced Desert War & Tactical Drops"),
+    (4, "Alpine", "❄️", "Multi-Tier Snow Terrain & Heavy Assault Combat"),
+    (5, "NexTerra", "⚡", "Futuristic Cyberpunk Battlefield & Anti-Gravity Zones"),
+]
 
 ROLE_CHOICES = [
     app_commands.Choice(name="👑 IGL (In-Game Leader / Captain)", value="IGL"),
@@ -55,6 +63,16 @@ class Esports(commands.Cog):
     result = app_commands.Group(
         name="result",
         description="Result commands"
+    )
+
+    section = app_commands.Group(
+        name="section",
+        description="CSE Batch & Section standings"
+    )
+
+    student = app_commands.Group(
+        name="student",
+        description="Student verification commands"
     )
 
     # =========================================================
@@ -431,12 +449,12 @@ class Esports(commands.Cog):
         )
 
     # =========================================================
-    # TEAM CREATE (4 Starters + 1 Extra Substitute Player with Roles)
+    # TEAM CREATE (4 Starters + 1 Extra Substitute Player with Roles & Batch/Section)
     # =========================================================
 
     @team.command(
         name="create",
-        description="Register a full 4-player squad + optional 5th player (substitute) with roles"
+        description="Register a full 4-player squad + optional 5th player (substitute) with roles and batch/section"
     )
     @app_commands.describe(
         tournament_id="Tournament ID",
@@ -444,6 +462,8 @@ class Esports(commands.Cog):
         tag="Team tag (e.g., WW, ALPHA)",
         captain_ign="Captain (P1) Free Fire IGN",
         captain_uid="Captain (P1) Free Fire UID",
+        batch="CSE Batch (e.g. 60, 59, 58)",
+        section="Section (e.g. A, B, C, D)",
         captain_role="Captain's role (IGL, Rusher, etc.)",
         p2_ign="Player 2 Free Fire IGN",
         p2_uid="Player 2 Free Fire UID",
@@ -478,6 +498,8 @@ class Esports(commands.Cog):
         tag: str,
         captain_ign: str,
         captain_uid: str,
+        batch: str = "",
+        section: str = "",
         captain_role: app_commands.Choice[str] = None,
         p2_ign: str = "",
         p2_uid: str = "",
@@ -501,6 +523,8 @@ class Esports(commands.Cog):
         tag = tag.strip().upper()
         captain_ign = captain_ign.strip()
         captain_uid = captain_uid.strip()
+        batch = batch.strip()
+        section = section.strip().upper()
         logo_url = logo_url.strip()
 
         if tournament_id < 1:
@@ -597,6 +621,19 @@ class Esports(commands.Cog):
         db = await connect()
 
         try:
+            # Check if user is verified to auto-fill batch/section if omitted
+            if not batch or not section:
+                cur = await db.execute(
+                    "SELECT batch, section FROM student_verifications WHERE user_id=?",
+                    (interaction.user.id,)
+                )
+                student_row = await cur.fetchone()
+                if student_row:
+                    if not batch:
+                        batch = student_row["batch"]
+                    if not section:
+                        section = student_row["section"]
+
             # Check tournament
             cur = await db.execute(
                 "SELECT * FROM tournaments WHERE id=?",
@@ -663,16 +700,20 @@ class Esports(commands.Cog):
                     name,
                     tag,
                     captain_id,
-                    logo_url
+                    logo_url,
+                    batch,
+                    section
                 )
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     tournament_id,
                     name,
                     tag,
                     interaction.user.id,
-                    logo_url
+                    logo_url,
+                    batch,
+                    section
                 )
             )
             team_id = cur.lastrowid
@@ -769,6 +810,11 @@ class Esports(commands.Cog):
         embed.add_field(name="🏆 Tournament", value=f"**{tournament['name']}** (`#{tournament_id}`)", inline=True)
         embed.add_field(name="👑 Captain", value=interaction.user.mention, inline=True)
         embed.add_field(name="👥 Squad Size", value=f"`{len(players_to_add)}/5 Players`", inline=True)
+        embed.add_field(
+            name="🏛️ CSE Batch & Sec",
+            value=f"`Batch {batch} (Sec {section})`" if batch and section else (f"`Batch {batch}`" if batch else (f"`Sec {section}`" if section else "`General`")),
+            inline=True
+        )
         embed.add_field(name="🐺 Hosted By", value=f"**{SERVER_NAME}**", inline=True)
 
         embed.add_field(
@@ -876,6 +922,8 @@ class Esports(commands.Cog):
         embed.add_field(name="🏆 Tournament", value=f"**{team['tournament_name']}** (`#{team['tournament_id']}`)", inline=True)
         embed.add_field(name="👑 Captain", value=f"<@{team['captain_id']}>", inline=True)
         embed.add_field(name="🆔 Team ID", value=f"`#{team['id']}`", inline=True)
+        batch_val = f"Batch {team['batch']} • Sec {team['section']}" if team['batch'] or team['section'] else "General"
+        embed.add_field(name="🏛️ CSE Batch & Sec", value=f"`{batch_val}`", inline=True)
 
         embed.add_field(
             name=f"⚔️ 4-Man Active Lineup ({min(4, len(members) - len([m for m in members if m['is_sub']]))}/4)",
@@ -1773,6 +1821,485 @@ class Esports(commands.Cog):
         await interaction.response.send_message(
             embed=embed
         )
+
+
+    @tournament.command(
+        name="fixtures",
+        description="Show tournament match fixtures & 5-map rotation schedule"
+    )
+    @app_commands.describe(
+        tournament_id="Tournament ID"
+    )
+    async def fixtures(
+        self,
+        interaction: discord.Interaction,
+        tournament_id: int
+    ):
+        if tournament_id < 1:
+            return await interaction.response.send_message(
+                embed=err("Invalid tournament ID."),
+                ephemeral=True
+            )
+
+        db = await connect()
+        try:
+            cur = await db.execute("SELECT * FROM tournaments WHERE id=?", (tournament_id,))
+            tourn = await cur.fetchone()
+
+            if not tourn:
+                await db.close()
+                return await interaction.response.send_message(
+                    embed=err("Tournament not found."),
+                    ephemeral=True
+                )
+
+            cur = await db.execute(
+                """
+                SELECT *
+                FROM matches
+                WHERE tournament_id=?
+                ORDER BY match_no ASC
+                """,
+                (tournament_id,)
+            )
+            scheduled_matches = await cur.fetchall()
+
+            cur = await db.execute(
+                """
+                SELECT COUNT(DISTINCT team_id) AS c
+                FROM (
+                    SELECT id AS team_id FROM teams WHERE tournament_id=?
+                    UNION
+                    SELECT team_id FROM registrations WHERE tournament_id=?
+                )
+                """,
+                (tournament_id, tournament_id)
+            )
+            reg_count = (await cur.fetchone())["c"]
+        finally:
+            await db.close()
+
+        embed = discord.Embed(
+            title=f"🗓️ {tourn['name']} • MATCH FIXTURES & MAP ROTATION",
+            description=(
+                f"```fix\n"
+                f"🐺 Root LU • OFFICIAL COMPETITIVE SCHEDULE 🐺\n"
+                f"```\n"
+                f"Official match schedule & 5-map Battle Royale rotation for **{tourn['name']}**.\n"
+                f"👥 Registered Squads: **{reg_count}/{tourn['max_teams']}** | 📌 Status: **{str(tourn['status']).upper()}**"
+            ),
+            color=discord.Color.from_rgb(59, 130, 246),
+            timestamp=discord.utils.utcnow()
+        )
+
+        # 1. Official 5-Map Rotation
+        rotation_lines = []
+        for m_no, map_name, emoji, desc in OFFICIAL_5_MAP_ROTATION:
+            rotation_lines.append(f"`Match {m_no}` {emoji} **{map_name}:** *{desc}*")
+        embed.add_field(
+            name="🗺️ Official 5-Map Rotation Schedule",
+            value="\n".join(rotation_lines),
+            inline=False
+        )
+
+        # 2. Scheduled Matches
+        if scheduled_matches:
+            match_lines = []
+            for m in scheduled_matches:
+                status_badge = "⏳ Scheduled"
+                if m["status"] == "room_open":
+                    status_badge = "🔴 ROOM LIVE"
+                elif m["status"] == "completed":
+                    status_badge = "🟢 Completed"
+
+                map_display = m["map"] or f"Map #{m['match_no']}"
+                match_lines.append(
+                    f"🎮 **Match #{m['match_no']}** (ID: `#{m['id']}`)\n"
+                    f"▸ 🗺️ Map: **{map_display}** • ⏰ Drop Time: `{m['scheduled_at']}`\n"
+                    f"▸ 📊 Status: **{status_badge}**"
+                )
+            embed.add_field(
+                name=f"⚔️ Scheduled Matches ({len(scheduled_matches)})",
+                value="\n\n".join(match_lines[:10]),
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name="⚔️ Scheduled Matches",
+                value="⚠️ *No matches scheduled in database yet. Staff can publish matches with `/match create`.*",
+                inline=False
+            )
+
+        # 3. Match Day Rules
+        embed.add_field(
+            name="📜 Match Day Protocols",
+            value=(
+                "▸ ⏱️ **Lobby Assembly:** Be in Discord voice/standby lobby **15 minutes** before scheduled match.\n"
+                "▸ 🔑 **Credentials Delivery:** Room ID & Password dispatched to Captain DMs via `/match room`.\n"
+                "▸ 📸 **Result Proof:** Captains must screenshot scoreboard and submit with `/result submit`."
+            ),
+            inline=False
+        )
+
+        embed.set_footer(text="🐺 Root LU • Leading University Tournament Center")
+        await interaction.response.send_message(embed=embed)
+
+    @result.command(
+        name="topfraggers",
+        description="Show tournament top-kill fraggers & MVP leaderboard"
+    )
+    @app_commands.describe(
+        tournament_id="Tournament ID (optional, leave 0 for all/active tournament)",
+        limit="Number of top fraggers to display (default: 10, max: 25)"
+    )
+    async def topfraggers(
+        self,
+        interaction: discord.Interaction,
+        tournament_id: int = 0,
+        limit: int = 10
+    ):
+        if tournament_id < 0:
+            return await interaction.response.send_message(
+                embed=err("Tournament ID must be a non-negative number."),
+                ephemeral=True
+            )
+
+        limit = max(1, min(25, limit))
+        await interaction.response.defer()
+
+        tourn_name = "Overall Championship"
+        if tournament_id > 0:
+            db = await connect()
+            cur = await db.execute("SELECT name FROM tournaments WHERE id=?", (tournament_id,))
+            t = await cur.fetchone()
+            await db.close()
+            if not t:
+                return await interaction.followup.send(
+                    embed=err(f"Tournament `#{tournament_id}` not found."),
+                    ephemeral=True
+                )
+            tourn_name = t["name"]
+
+        fraggers = await top_fraggers(tournament_id, limit)
+
+        embed = discord.Embed(
+            title="🔥 Root LU • TOURNAMENT TOP FRAGGERS (KILL LEADERBOARD)",
+            description=(
+                f"```fix\n"
+                f"👑 MOST LETHAL PLAYERS • {tourn_name.upper()} 👑\n"
+                f"```\n"
+                f"Official ranking of highest individual kill performers across verified matches."
+            ),
+            color=discord.Color.from_rgb(239, 68, 68),
+            timestamp=discord.utils.utcnow()
+        )
+
+        if not fraggers or (len(fraggers) == 1 and fraggers[0]["kills"] == 0):
+            embed.description += "\n\n⚠️ *No verified kills or match results recorded yet.*"
+        else:
+            medals = {1: "👑", 2: "🥈", 3: "🥉"}
+            total_kills_sum = 0
+            for idx, f in enumerate(fraggers, start=1):
+                total_kills_sum += f["kills"]
+                medal = medals.get(idx, f"`#{idx:02d}`")
+                role_badge = ROLE_BADGES.get(f.get("role"), f"🎮 {f.get('role', 'Player')}")
+                batch_info = f" • CSE {f['batch']}-{f['section']}" if f.get("batch") and f.get("section") else ""
+
+                if idx == 1:
+                    title_line = f"{medal} **TOP FRAGGER / MVP: `{f['ign']}`** `[{f['team_tag']}]`"
+                    val_line = (
+                        f"💀 **{f['kills']} KILLS** • 🎖️ **{role_badge}**\n"
+                        f"🛡️ Squad: **{f['team_name']}**{batch_info} • 🎮 Matches: **{f['matches']}**"
+                    )
+                else:
+                    title_line = f"{medal} `{f['ign']}` `[{f['team_tag']}]`"
+                    val_line = (
+                        f"🔫 **{f['kills']} Kills** • {role_badge} • **{f['team_name']}**{batch_info}"
+                    )
+                embed.add_field(name=title_line, value=val_line, inline=False)
+
+            embed.add_field(
+                name="📊 Fragger Statistics",
+                value=f"🔥 Top Fraggers Tracked: **{len(fraggers)}** | 💀 Combined Kills: **{total_kills_sum}**",
+                inline=False
+            )
+
+        embed.set_footer(text="🐺 Root LU • Free Fire Esports Statistics")
+        await interaction.followup.send(embed=embed)
+
+    @section.command(
+        name="leaderboard",
+        description="Show CSE Batch & Section points table and rankings"
+    )
+    @app_commands.describe(
+        tournament_id="Tournament ID (optional, leave 0 for all/active tournament)"
+    )
+    async def section_leaderboard_cmd(
+        self,
+        interaction: discord.Interaction,
+        tournament_id: int = 0
+    ):
+        if tournament_id < 0:
+            return await interaction.response.send_message(
+                embed=err("Tournament ID must be a non-negative number."),
+                ephemeral=True
+            )
+
+        await interaction.response.defer()
+
+        tourn_name = "Overall Championship"
+        if tournament_id > 0:
+            db = await connect()
+            cur = await db.execute("SELECT name FROM tournaments WHERE id=?", (tournament_id,))
+            t = await cur.fetchone()
+            await db.close()
+            if not t:
+                return await interaction.followup.send(
+                    embed=err(f"Tournament `#{tournament_id}` not found."),
+                    ephemeral=True
+                )
+            tourn_name = t["name"]
+
+        sections = await section_leaderboard(tournament_id)
+
+        embed = discord.Embed(
+            title="🏆 Root LU • CSE BATCH & SECTION LEADERBOARD",
+            description=(
+                f"```fix\n"
+                f"🏛️ LEADING UNIVERSITY • CSE ESPORTS STANDINGS 🏛️\n"
+                f"```\n"
+                f"Official section points and standings for **{tourn_name}**."
+            ),
+            color=discord.Color.from_rgb(124, 58, 237),
+            timestamp=discord.utils.utcnow()
+        )
+
+        if not sections:
+            embed.description += "\n\n⚠️ *No verified match results recorded for CSE sections yet.*"
+        else:
+            medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+            for idx, sec in enumerate(sections, start=1):
+                medal = medals.get(idx, f"`#{idx:02d}`")
+                batch_str = f"Batch {sec['batch']}" if sec['batch'].lower() != 'general' and sec['batch'].lower() != 'unassigned' else "General Batch"
+                sec_str = f"Section {sec['section']}" if sec['section'].lower() != 'open' and sec['section'].lower() != 'general' else "Open Section"
+                title_line = f"{medal} **{batch_str} — {sec_str}**"
+
+                value_line = (
+                    f"💎 **{sec['pts']} PTS** • 🔫 **{sec['kills']} Kills** • 👥 **{sec['teams_count']} Squads** • 🎮 **{sec['matches']} Matches**\n"
+                    f"👑 Top Squad: **{sec['top_team_name']}** `[{sec['top_team_tag']}]` ({sec['top_team_pts']} PTS)"
+                )
+                embed.add_field(name=title_line, value=value_line, inline=False)
+
+        embed.set_footer(text="🐺 Root LU • Leading University CSE Free Fire League")
+        await interaction.followup.send(embed=embed)
+
+    @student.command(
+        name="verify",
+        description="Verify official Leading University Student ID"
+    )
+    @app_commands.describe(
+        student_id="Official Leading University Student ID (e.g., 2012020123)",
+        name="Full Name (as per Student ID)",
+        batch="CSE Batch (e.g., 60, 59, 58)",
+        section="Section (e.g., A, B, C, D)",
+        department="Department (default: CSE)"
+    )
+    async def student_verify_cmd(
+        self,
+        interaction: discord.Interaction,
+        student_id: str,
+        name: str,
+        batch: str,
+        section: str,
+        department: str = "CSE"
+    ):
+        student_id = student_id.strip()
+        name = name.strip()
+        batch = batch.strip()
+        section = section.strip().upper()
+        department = department.strip().upper() if department else "CSE"
+
+        if len(student_id) < 3:
+            return await interaction.response.send_message(
+                embed=err("Please enter a valid Student ID."),
+                ephemeral=True
+            )
+
+        if len(name) < 2:
+            return await interaction.response.send_message(
+                embed=err("Please enter your full name."),
+                ephemeral=True
+            )
+
+        if not batch or not section:
+            return await interaction.response.send_message(
+                embed=err("Batch and Section are required for verification."),
+                ephemeral=True
+            )
+
+        db = await connect()
+        try:
+            # Check if user already verified
+            cur = await db.execute(
+                "SELECT * FROM student_verifications WHERE user_id=?",
+                (interaction.user.id,)
+            )
+            existing_user = await cur.fetchone()
+            if existing_user:
+                await db.close()
+                return await interaction.response.send_message(
+                    embed=base(
+                        "🎓 Already Verified",
+                        (
+                            f"You are already verified as a Leading University student!\n\n"
+                            f"👤 **Name:** {existing_user['full_name']}\n"
+                            f"🆔 **Student ID:** `{existing_user['student_id']}`\n"
+                            f"🏛️ **Department:** {existing_user['department']}\n"
+                            f"📚 **Batch & Section:** Batch {existing_user['batch']} (Sec {existing_user['section']})\n"
+                            f"🛡️ **Status:** 🟢 **VERIFIED**"
+                        ),
+                        color=discord.Color.from_rgb(16, 185, 129)
+                    ),
+                    ephemeral=True
+                )
+
+            # Check if student ID already registered by someone else
+            cur = await db.execute(
+                "SELECT * FROM student_verifications WHERE student_id=?",
+                (student_id,)
+            )
+            existing_id = await cur.fetchone()
+            if existing_id:
+                await db.close()
+                return await interaction.response.send_message(
+                    embed=err(
+                        f"Student ID `{student_id}` is already registered to another Discord account.\n"
+                        "If you believe this is an error, please contact staff via `/ticket`."
+                    ),
+                    ephemeral=True
+                )
+
+            # Insert verification
+            await db.execute(
+                """
+                INSERT INTO student_verifications
+                (user_id, student_id, full_name, department, batch, section, status)
+                VALUES (?, ?, ?, ?, ?, ?, 'verified')
+                """,
+                (interaction.user.id, student_id, name, department, batch, section)
+            )
+            await db.commit()
+
+        except Exception as e:
+            await db.rollback()
+            await db.close()
+            return await interaction.response.send_message(
+                embed=err(f"Verification failed.\n```{e}```"),
+                ephemeral=True
+            )
+
+        await db.close()
+
+        await audit(interaction.user.id, "student_verify", f"{student_id}:{department}-{batch}-{section}")
+
+        # Attempt to assign verified student role if present
+        if interaction.guild:
+            for r_name in ("Verified Student", "Student", "Root LU", "Verified"):
+                role = discord.utils.get(interaction.guild.roles, name=r_name)
+                if role:
+                    try:
+                        await interaction.user.add_roles(role, reason="Student ID verified")
+                        break
+                    except Exception:
+                        pass
+
+        embed = discord.Embed(
+            title="🎓 Root LU • STUDENT VERIFICATION SUCCESSFUL",
+            description=(
+                f"```fix\n"
+                f"🏛️ LEADING UNIVERSITY • ROOT LU VERIFIED 🏛️\n"
+                f"```\n"
+                f"Congratulations {interaction.user.mention}! Your Leading University student identity has been verified."
+            ),
+            color=discord.Color.from_rgb(16, 185, 129),
+            timestamp=discord.utils.utcnow()
+        )
+
+        embed.add_field(name="👤 Student Name", value=f"**{name}**", inline=True)
+        embed.add_field(name="🆔 Student ID", value=f"`{student_id}`", inline=True)
+        embed.add_field(name="🏛️ Department", value=f"`{department}`", inline=True)
+        embed.add_field(name="📚 Batch & Section", value=f"**Batch {batch} (Sec {section})**", inline=True)
+        embed.add_field(name="🛡️ Status", value="🟢 **VERIFIED STUDENT**", inline=True)
+        embed.add_field(name="🐺 Community", value="**Root LU • Leading University**", inline=True)
+        embed.set_footer(text="🐺 Root LU • Official Student Verification System")
+
+        await interaction.response.send_message(embed=embed)
+
+    @student.command(
+        name="profile",
+        description="View student verification profile"
+    )
+    @app_commands.describe(
+        member="Discord member to check (defaults to yourself)"
+    )
+    async def student_profile_cmd(
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member = None
+    ):
+        target = member or interaction.user
+        db = await connect()
+        cur = await db.execute("SELECT * FROM student_verifications WHERE user_id=?", (target.id,))
+        v = await cur.fetchone()
+
+        # Query target's teams
+        cur = await db.execute(
+            """
+            SELECT t.id, t.name, t.tag, t.batch, t.section, tour.name AS tour_name
+            FROM teams t
+            JOIN tournaments tour ON tour.id = t.tournament_id
+            WHERE t.captain_id = ?
+            UNION
+            SELECT t.id, t.name, t.tag, t.batch, t.section, tour.name AS tour_name
+            FROM team_members tm
+            JOIN teams t ON t.id = tm.team_id
+            JOIN tournaments tour ON tour.id = t.tournament_id
+            WHERE tm.user_id = ?
+            """,
+            (target.id, target.id)
+        )
+        teams = await cur.fetchall()
+        await db.close()
+
+        if not v:
+            return await interaction.response.send_message(
+                embed=err(
+                    f"{target.mention} is not verified yet.\n"
+                    f"Use `/student verify` to verify your Leading University Student ID."
+                ),
+                ephemeral=True
+            )
+
+        embed = discord.Embed(
+            title=f"🎓 Student Profile • {v['full_name']}",
+            description=f"Official verified student profile on **Root LU**.",
+            color=discord.Color.from_rgb(59, 130, 246),
+            timestamp=discord.utils.utcnow()
+        )
+        embed.add_field(name="👤 Full Name", value=f"**{v['full_name']}**", inline=True)
+        embed.add_field(name="🆔 Student ID", value=f"`{v['student_id']}`", inline=True)
+        embed.add_field(name="🏛️ Department", value=f"`{v['department']}`", inline=True)
+        embed.add_field(name="📚 Batch & Section", value=f"**Batch {v['batch']} (Sec {v['section']})**", inline=True)
+        embed.add_field(name="🛡️ Verification Status", value="🟢 **VERIFIED**", inline=True)
+        embed.add_field(name="📅 Verified At", value=f"`{v['created_at'][:10]}`", inline=True)
+
+        if teams:
+            team_lines = [f"• **{tm['name']}** `[{tm['tag']}]` ({tm['tour_name']})" for tm in teams[:5]]
+            embed.add_field(name="🎮 Esports Teams", value="\n".join(team_lines), inline=False)
+
+        embed.set_thumbnail(url=target.display_avatar.url)
+        embed.set_footer(text="🐺 Root LU • Leading University")
+        await interaction.response.send_message(embed=embed)
 
 
     @tournament.command(name="slots", description="Show registered lobby slots")

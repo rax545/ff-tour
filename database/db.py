@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS teams (
     tag TEXT NOT NULL,
     captain_id INTEGER NOT NULL,
     logo_url TEXT DEFAULT '',
+    batch TEXT DEFAULT '',
+    section TEXT DEFAULT '',
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
 
     FOREIGN KEY (tournament_id)
@@ -70,6 +72,19 @@ CREATE TABLE IF NOT EXISTS team_members (
 );
 
 
+CREATE TABLE IF NOT EXISTS student_verifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL UNIQUE,
+    student_id TEXT NOT NULL UNIQUE,
+    full_name TEXT NOT NULL,
+    department TEXT DEFAULT 'CSE',
+    batch TEXT NOT NULL,
+    section TEXT NOT NULL,
+    status TEXT DEFAULT 'verified',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+
 CREATE TABLE IF NOT EXISTS matches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     tournament_id INTEGER NOT NULL,
@@ -102,6 +117,28 @@ CREATE TABLE IF NOT EXISTS results (
     submitted_by INTEGER,
 
     UNIQUE(match_id, team_id),
+
+    FOREIGN KEY (match_id)
+        REFERENCES matches(id)
+        ON DELETE CASCADE,
+
+    FOREIGN KEY (team_id)
+        REFERENCES teams(id)
+        ON DELETE CASCADE
+);
+
+
+CREATE TABLE IF NOT EXISTS player_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_id INTEGER NOT NULL,
+    team_id INTEGER NOT NULL,
+    member_id INTEGER,
+    ign TEXT NOT NULL,
+    uid TEXT DEFAULT '',
+    kills INTEGER DEFAULT 0,
+    damage INTEGER DEFAULT 0,
+    verified INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
 
     FOREIGN KEY (match_id)
         REFERENCES matches(id)
@@ -192,7 +229,7 @@ async def connect():
 
 async def init_db():
     """
-    Initialize all database tables.
+    Initialize all database tables and run migrations.
     """
 
     db = await connect()
@@ -204,7 +241,10 @@ async def init_db():
 
         # Migration: ensure banner_url column exists in tournaments table
         try:
-            await db.execute("ALTER TABLE tournaments ADD COLUMN banner_url TEXT DEFAULT ''")
+            cur = await db.execute("PRAGMA table_info(tournaments)")
+            cols = [r[1] for r in await cur.fetchall()]
+            if "banner_url" not in cols:
+                await db.execute("ALTER TABLE tournaments ADD COLUMN banner_url TEXT DEFAULT ''")
         except Exception:
             pass
 
@@ -214,6 +254,17 @@ async def init_db():
             cols = [r[1] for r in await cur.fetchall()]
             if "is_sub" not in cols:
                 await db.execute("ALTER TABLE team_members ADD COLUMN is_sub INTEGER DEFAULT 0")
+        except Exception:
+            pass
+
+        # Migration: ensure teams table has batch and section columns
+        try:
+            cur = await db.execute("PRAGMA table_info(teams)")
+            cols = [r[1] for r in await cur.fetchall()]
+            if "batch" not in cols:
+                await db.execute("ALTER TABLE teams ADD COLUMN batch TEXT DEFAULT ''")
+            if "section" not in cols:
+                await db.execute("ALTER TABLE teams ADD COLUMN section TEXT DEFAULT ''")
         except Exception:
             pass
 

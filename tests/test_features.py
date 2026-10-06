@@ -2,6 +2,7 @@ import asyncio
 import io
 import os
 import sys
+import unittest
 import aiosqlite
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -9,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import SERVER_NAME, BRAND
 from database.db import connect, init_db
 from services.scoring import calculate
-from services.leaderboard import leaderboard
+from services.leaderboard import leaderboard, section_leaderboard, top_fraggers
 from utils.banner import (
     generate_tournament_banner,
     generate_match_banner,
@@ -23,138 +24,251 @@ from utils.embeds import (
     og_match_dm_embed,
     og_room_dm_embed
 )
+from cogs.esports import OFFICIAL_5_MAP_ROTATION
 
 
-async def run_tests():
-    print(f"Testing with SERVER_NAME = {SERVER_NAME}")
+class FeatureTests(unittest.IsolatedAsyncioTestCase):
 
-    # 1. Test clean_text_for_image
-    cleaned = clean_text_for_image(SERVER_NAME)
-    print(f"[1] clean_text_for_image('{SERVER_NAME}') -> '{cleaned}'")
-    assert "WHITE WOLF GLOBAL" in cleaned.upper(), f"Expected WHITE WOLF GLOBAL, got {cleaned}"
+    async def asyncSetUp(self):
+        await init_db()
 
-    # 2. Test banner generation
-    print("[2] Generating tournament banner...")
-    tourn_buf = generate_tournament_banner(
-        tournament_name="FREE FIRE PRO INVITATIONAL 2026",
-        server_name=SERVER_NAME,
-        max_teams=48,
-        prize_pool=10000,
-        entry_fee=200,
-        tournament_id=99,
-        status="OPEN"
-    )
-    assert isinstance(tourn_buf, io.BytesIO)
-    tourn_bytes = tourn_buf.getvalue()
-    assert len(tourn_bytes) > 10000, f"Banner image too small: {len(tourn_bytes)}"
-    print(f"    Tournament banner generated successfully: {len(tourn_bytes)} bytes")
+    async def test_01_clean_text_and_banners(self):
+        # 1. clean_text_for_image
+        cleaned = clean_text_for_image("Root LU Esports")
+        self.assertIn("ROOT LU", cleaned.upper())
 
-    # 3. Test match banner generation
-    print("[3] Generating match banner...")
-    match_buf = generate_match_banner(
-        tournament_name="FREE FIRE PRO INVITATIONAL 2026",
-        match_no=1,
-        map_name="Bermuda",
-        scheduled_at="Tonight 9:00 PM",
-        server_name=SERVER_NAME
-    )
-    assert isinstance(match_buf, io.BytesIO)
-    match_bytes = match_buf.getvalue()
-    assert len(match_bytes) > 10000, f"Match banner image too small: {len(match_bytes)}"
-    print(f"    Match banner generated successfully: {len(match_bytes)} bytes")
+        # 2. Tournament banner
+        tourn_buf = generate_tournament_banner(
+            tournament_name="ROOT LU CSE CHAMPIONSHIP 2026",
+            server_name="Root LU",
+            max_teams=24,
+            prize_pool=5000,
+            entry_fee=100,
+            tournament_id=1,
+            status="OPEN"
+        )
+        self.assertIsInstance(tourn_buf, io.BytesIO)
+        self.assertGreater(len(tourn_buf.getvalue()), 10000)
 
-    # 4. Test 4+1 lineup in OG Match DM embed
-    print("[4] Testing OG Match DM embed with 4 Starters + 1 Substitute...")
-    test_lineup = [
-        {"user_id": 11111, "ign": "WW_Leader", "uid": "10000001", "role": "IGL", "is_sub": 0},
-        {"user_id": 22222, "ign": "WW_Rusher", "uid": "10000002", "role": "Rusher", "is_sub": 0},
-        {"user_id": 33333, "ign": "WW_Sniper", "uid": "10000003", "role": "Sniper", "is_sub": 0},
-        {"user_id": 44444, "ign": "WW_Assault", "uid": "10000004", "role": "Assaulter", "is_sub": 0},
-        {"user_id": 55555, "ign": "WW_SubExtra", "uid": "10000005", "role": "Substitute", "is_sub": 1},
-    ]
-    dm_embed = og_match_dm_embed(
-        team_name="White Wolf Esports",
-        team_tag="WW",
-        tournament_name="PRO LEAGUE S1",
-        tournament_id=1,
-        match_no=1,
-        match_id=101,
-        map_name="Bermuda",
-        scheduled_at="Tonight 9:00 PM",
-        lineup_details=test_lineup,
-        server_name=SERVER_NAME
-    )
-    embed_dict = dm_embed.to_dict()
-    assert SERVER_NAME in embed_dict["title"], "Server name missing in DM embed title"
-    assert "White Wolf Esports" in embed_dict["description"], "Team name missing in DM embed description"
-    assert "WW" in embed_dict["description"], "Team tag missing in DM embed description"
+        # 3. Match banner
+        match_buf = generate_match_banner(
+            tournament_name="ROOT LU CSE CHAMPIONSHIP 2026",
+            match_no=1,
+            map_name="Bermuda",
+            scheduled_at="Tonight 9:00 PM",
+            server_name="Root LU"
+        )
+        self.assertIsInstance(match_buf, io.BytesIO)
+        self.assertGreater(len(match_buf.getvalue()), 10000)
 
-    # Verify lineup field exists and has all 5 players and roles
-    lineup_field = next((f for f in embed_dict.get("fields", []) if "Lineup" in f["name"]), None)
-    assert lineup_field is not None, "Missing Lineup & Roles field in DM embed"
-    lineup_val = lineup_field["value"]
-    assert "WW_Leader" in lineup_val and "10000001" in lineup_val and "IGL" in lineup_val
-    assert "WW_Rusher" in lineup_val and "10000002" in lineup_val and "Rusher" in lineup_val
-    assert "WW_Sniper" in lineup_val and "10000003" in lineup_val and "Sniper" in lineup_val
-    assert "WW_Assault" in lineup_val and "10000004" in lineup_val and "Assaulter" in lineup_val
-    assert "WW_SubExtra" in lineup_val and "10000005" in lineup_val and "Substitute" in lineup_val
-    print("    Lineup & 4+1 roles in OG Match DM embed verified successfully!")
+    async def test_02_student_verification_system(self):
+        """Feature 2: /student verify verification logic & DB constraints"""
+        db = await connect()
 
-    # 5. Test Database creation & 4 Starters + 1 Sub insertion
-    print("[5] Testing Database schema and 4 Starters + 1 Sub roster...")
-    await init_db()
-    db = await connect()
+        # Clean existing test verifications
+        await db.execute("DELETE FROM student_verifications WHERE user_id IN (1001, 1002)")
+        await db.commit()
 
-    # Insert test tournament
-    cur = await db.execute(
-        """
-        INSERT INTO tournaments (name, description, max_teams, entry_fee, prize_pool, created_by)
-        VALUES ('Full Lineup Championship', 'Testing 4+1 players', 12, 50, 500, 12345)
-        """
-    )
-    t_id = cur.lastrowid
-
-    # Insert test team
-    cur = await db.execute(
-        """
-        INSERT INTO teams (tournament_id, name, tag, captain_id)
-        VALUES (?, 'Alpha Predators', 'PRED', 11111)
-        """,
-        (t_id,)
-    )
-    team_id = cur.lastrowid
-
-    # Insert 4 starters + 1 substitute
-    for p in test_lineup:
+        # Insert student verification
         await db.execute(
             """
-            INSERT INTO team_members (team_id, user_id, ign, uid, role, is_sub)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO student_verifications
+            (user_id, student_id, full_name, department, batch, section, status)
+            VALUES (?, ?, ?, ?, ?, ?, 'verified')
             """,
-            (team_id, p["user_id"], p["ign"], p["uid"], p["role"], p["is_sub"])
+            (1001, "2012020123", "Joy Ahmed", "CSE", "60", "A")
         )
+        await db.commit()
 
-    # Check member count
-    cur = await db.execute("SELECT COUNT(*) AS c FROM team_members WHERE team_id=?", (team_id,))
-    total_c = (await cur.fetchone())["c"]
-    assert total_c == 5, f"Expected 5 players, got {total_c}"
+        # Verify entry
+        cur = await db.execute("SELECT * FROM student_verifications WHERE user_id=?", (1001,))
+        row = await cur.fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["student_id"], "2012020123")
+        self.assertEqual(row["full_name"], "Joy Ahmed")
+        self.assertEqual(row["department"], "CSE")
+        self.assertEqual(row["batch"], "60")
+        self.assertEqual(row["section"], "A")
+        self.assertEqual(row["status"], "verified")
 
-    cur = await db.execute("SELECT COUNT(*) AS c FROM team_members WHERE team_id=? AND is_sub=0", (team_id,))
-    starter_c = (await cur.fetchone())["c"]
-    assert starter_c == 4, f"Expected 4 starters, got {starter_c}"
+        # Duplicate user_id constraint test
+        with self.assertRaises(Exception):
+            await db.execute(
+                """
+                INSERT INTO student_verifications
+                (user_id, student_id, full_name, department, batch, section, status)
+                VALUES (?, ?, ?, ?, ?, ?, 'verified')
+                """,
+                (1001, "2012020999", "Another Name", "CSE", "61", "B")
+            )
+            await db.commit()
 
-    cur = await db.execute("SELECT COUNT(*) AS c FROM team_members WHERE team_id=? AND is_sub=1", (team_id,))
-    sub_c = (await cur.fetchone())["c"]
-    assert sub_c == 1, f"Expected 1 sub, got {sub_c}"
+        # Duplicate student_id constraint test
+        with self.assertRaises(Exception):
+            await db.execute(
+                """
+                INSERT INTO student_verifications
+                (user_id, student_id, full_name, department, batch, section, status)
+                VALUES (?, ?, ?, ?, ?, ?, 'verified')
+                """,
+                (1002, "2012020123", "Duplicate ID User", "CSE", "60", "A")
+            )
+            await db.commit()
 
-    # Clean up test rows
-    await db.execute("DELETE FROM tournaments WHERE id=?", (t_id,))
-    await db.commit()
-    await db.close()
-    print("    Database 4 Starters + 1 Sub tests passed successfully!")
+        await db.close()
 
-    print("\nALL LINEUP & ROLE TESTS PASSED! 🔥🐺")
+    async def test_03_team_create_with_batch_and_section(self):
+        """Feature 5: /team create with batch, section and 4+1 roster"""
+        db = await connect()
+
+        # Insert tournament
+        cur = await db.execute(
+            "INSERT INTO tournaments (name, description, max_teams, entry_fee, prize_pool) VALUES ('LU Premier League', 'Test', 12, 0, 1000)"
+        )
+        t_id = cur.lastrowid
+
+        # Insert team with batch and section
+        cur = await db.execute(
+            """
+            INSERT INTO teams (tournament_id, name, tag, captain_id, batch, section)
+            VALUES (?, 'CSE Predators', 'PRED', 1001, '60', 'A')
+            """,
+            (t_id,)
+        )
+        team_id = cur.lastrowid
+
+        # Insert 4 starters + 1 substitute
+        players = [
+            (team_id, 1001, "PRED_Joy", "UID001", "IGL", 0),
+            (team_id, 1002, "PRED_Rusher", "UID002", "Rusher", 0),
+            (team_id, 1003, "PRED_Sniper", "UID003", "Sniper", 0),
+            (team_id, 1004, "PRED_Assault", "UID004", "Assaulter", 0),
+            (team_id, 1005, "PRED_Sub", "UID005", "Substitute", 1),
+        ]
+        for p in players:
+            await db.execute(
+                "INSERT INTO team_members (team_id, user_id, ign, uid, role, is_sub) VALUES (?, ?, ?, ?, ?, ?)",
+                p
+            )
+        await db.commit()
+
+        # Query team
+        cur = await db.execute("SELECT * FROM teams WHERE id=?", (team_id,))
+        t_row = await cur.fetchone()
+        self.assertEqual(t_row["batch"], "60")
+        self.assertEqual(t_row["section"], "A")
+
+        # Query members
+        cur = await db.execute("SELECT COUNT(*) AS c FROM team_members WHERE team_id=?", (team_id,))
+        self.assertEqual((await cur.fetchone())["c"], 5)
+
+        await db.close()
+
+    async def test_04_section_leaderboard_and_rankings(self):
+        """Feature 1: /section leaderboard - Points aggregation by CSE Batch and Section"""
+        db = await connect()
+
+        # Create tournament
+        cur = await db.execute("INSERT INTO tournaments (name) VALUES ('LU Section Clash')")
+        t_id = cur.lastrowid
+
+        # Create 3 teams across 2 sections
+        # Batch 60 Sec A - Team 1
+        cur = await db.execute("INSERT INTO teams (tournament_id, name, tag, captain_id, batch, section) VALUES (?, 'LU 60A Alpha', '60A1', 2001, '60', 'A')", (t_id,))
+        team_60a_1 = cur.lastrowid
+        # Batch 60 Sec A - Team 2
+        cur = await db.execute("INSERT INTO teams (tournament_id, name, tag, captain_id, batch, section) VALUES (?, 'LU 60A Bravo', '60A2', 2002, '60', 'A')", (t_id,))
+        team_60a_2 = cur.lastrowid
+        # Batch 58 Sec B - Team 1
+        cur = await db.execute("INSERT INTO teams (tournament_id, name, tag, captain_id, batch, section) VALUES (?, 'LU 58B Legends', '58B', 2003, '58', 'B')", (t_id,))
+        team_58b = cur.lastrowid
+
+        # Create matches
+        cur = await db.execute("INSERT INTO matches (tournament_id, match_no, map) VALUES (?, 1, 'Bermuda')", (t_id,))
+        m1 = cur.lastrowid
+        cur = await db.execute("INSERT INTO matches (tournament_id, match_no, map) VALUES (?, 2, 'Purgatory')", (t_id,))
+        m2 = cur.lastrowid
+
+        # Submit verified results
+        # Team 60A_1: Match 1: 1st place (12 pts) + 8 kills (8 pts) = 20 pts
+        # Team 60A_2: Match 1: 3rd place (8 pts) + 4 kills (4 pts) = 12 pts
+        # Team 58B: Match 1: 2nd place (9 pts) + 6 kills (6 pts) = 15 pts
+        # Batch 60A total = 32 pts, 12 kills
+        # Batch 58B total = 15 pts, 6 kills
+        await db.execute("INSERT INTO results (match_id, team_id, placement, kills, placement_points, kill_points, total_points, verified) VALUES (?, ?, 1, 8, 12, 8, 20, 1)", (m1, team_60a_1))
+        await db.execute("INSERT INTO results (match_id, team_id, placement, kills, placement_points, kill_points, total_points, verified) VALUES (?, ?, 3, 4, 8, 4, 12, 1)", (m1, team_60a_2))
+        await db.execute("INSERT INTO results (match_id, team_id, placement, kills, placement_points, kill_points, total_points, verified) VALUES (?, ?, 2, 6, 9, 6, 15, 1)", (m1, team_58b))
+        await db.commit()
+        await db.close()
+
+        # Run section leaderboard
+        sec_rows = await section_leaderboard(t_id)
+        self.assertEqual(len(sec_rows), 2)
+
+        # Rank 1 must be Batch 60 Section A
+        rank1 = sec_rows[0]
+        self.assertEqual(rank1["batch"], "60")
+        self.assertEqual(rank1["section"], "A")
+        self.assertEqual(rank1["pts"], 32)
+        self.assertEqual(rank1["kills"], 12)
+        self.assertEqual(rank1["teams_count"], 2)
+        self.assertEqual(rank1["top_team_name"], "LU 60A Alpha")
+
+        # Rank 2 must be Batch 58 Section B
+        rank2 = sec_rows[1]
+        self.assertEqual(rank2["batch"], "58")
+        self.assertEqual(rank2["section"], "B")
+        self.assertEqual(rank2["pts"], 15)
+        self.assertEqual(rank2["kills"], 6)
+        self.assertEqual(rank2["teams_count"], 1)
+
+    async def test_05_result_topfraggers(self):
+        """Feature 3: /result topfraggers - Most kills & MVP leaderboard"""
+        db = await connect()
+
+        # Create tournament and teams
+        cur = await db.execute("INSERT INTO tournaments (name) VALUES ('LU Fraggers League')")
+        t_id = cur.lastrowid
+
+        cur = await db.execute("INSERT INTO teams (tournament_id, name, tag, captain_id, batch, section) VALUES (?, 'Root Hunters', 'RH', 3001, '60', 'A')", (t_id,))
+        t1_id = cur.lastrowid
+        cur = await db.execute("INSERT INTO teams (tournament_id, name, tag, captain_id, batch, section) VALUES (?, 'Root Assassins', 'RA', 3002, '59', 'B')", (t_id,))
+        t2_id = cur.lastrowid
+
+        # Insert players
+        await db.execute("INSERT INTO team_members (team_id, user_id, ign, uid, role, is_sub) VALUES (?, 3001, 'RH_SniperGod', '111', 'Sniper', 0)", (t1_id,))
+        await db.execute("INSERT INTO team_members (team_id, user_id, ign, uid, role, is_sub) VALUES (?, 3002, 'RA_RusherKing', '222', 'Rusher', 0)", (t2_id,))
+
+        cur = await db.execute("INSERT INTO matches (tournament_id, match_no, map) VALUES (?, 1, 'Bermuda')", (t_id,))
+        m1 = cur.lastrowid
+
+        # Insert individual player results
+        await db.execute("INSERT INTO player_results (match_id, team_id, ign, uid, kills, verified) VALUES (?, ?, 'RH_SniperGod', '111', 9, 1)", (m1, t1_id))
+        await db.execute("INSERT INTO player_results (match_id, team_id, ign, uid, kills, verified) VALUES (?, ?, 'RA_RusherKing', '222', 5, 1)", (m1, t2_id))
+        await db.commit()
+        await db.close()
+
+        # Query top fraggers
+        fraggers = await top_fraggers(t_id, limit=5)
+        self.assertGreaterEqual(len(fraggers), 2)
+
+        # Top fragger must be RH_SniperGod with 9 kills
+        self.assertEqual(fraggers[0]["ign"], "RH_SniperGod")
+        self.assertEqual(fraggers[0]["kills"], 9)
+        self.assertEqual(fraggers[0]["team_tag"], "RH")
+
+        # 2nd fragger must be RA_RusherKing with 5 kills
+        self.assertEqual(fraggers[1]["ign"], "RA_RusherKing")
+        self.assertEqual(fraggers[1]["kills"], 5)
+
+    async def test_06_tournament_fixtures_and_5_map_rotation(self):
+        """Feature 4: /tournament fixtures & 5-map rotation schedule"""
+        # Verify 5 official competitive maps
+        expected_maps = ["Bermuda", "Purgatory", "Kalahari", "Alpine", "NexTerra"]
+        actual_maps = [m[1] for m in OFFICIAL_5_MAP_ROTATION]
+        self.assertEqual(actual_maps, expected_maps)
+        self.assertEqual(len(OFFICIAL_5_MAP_ROTATION), 5)
 
 
 if __name__ == "__main__":
-    asyncio.run(run_tests())
+    unittest.main()
