@@ -276,3 +276,81 @@ def og_room_dm_embed(
         text=f"🐺 {server_name} • Free Fire Esports Arena"
     )
     return embed
+
+
+def match_reminder_embed(
+    tournament_name: str,
+    tournament_id: int,
+    match_no: int,
+    match_id: int,
+    map_name: str,
+    match_time_unix: int,
+    offset_minutes: int,
+    server_name: str = SERVER_NAME
+) -> discord.Embed:
+    """
+    Countdown reminder embed, sent to the announcement channel and
+    squad members' DMs by the automated match reminder system.
+    """
+    if offset_minutes >= 60:
+        hours = offset_minutes // 60
+        mins = offset_minutes % 60
+        countdown = f"{hours}h {mins}m" if mins else f"{hours} hour{'s' if hours > 1 else ''}"
+    else:
+        countdown = f"{offset_minutes} minute{'s' if offset_minutes > 1 else ''}"
+
+    urgency_color = (
+        discord.Color.from_rgb(239, 68, 68) if offset_minutes <= 5
+        else discord.Color.from_rgb(245, 158, 11) if offset_minutes <= 15
+        else discord.Color.from_rgb(59, 130, 246)
+    )
+
+    embed = discord.Embed(
+        title=f"⏰ MATCH REMINDER • STARTS IN {countdown.upper()}!",
+        description=(
+            f"```fix\n"
+            f"🐺 {server_name} • BATTLE COUNTDOWN 🐺\n"
+            f"```\n"
+            f"⚔️ **Match #{match_no}** of **{tournament_name}** is about to begin!\n"
+            f"Drop everything, rally your squad and get in the lobby. 🔥"
+        ),
+        color=urgency_color,
+        timestamp=discord.utils.utcnow()
+    )
+    embed.add_field(
+        name="🏆 Tournament",
+        value=f"**{tournament_name}** (`#{tournament_id}`)",
+        inline=True
+    )
+    embed.add_field(
+        name="🎮 Match",
+        value=f"**Match #{match_no}** (ID: `#{match_id}`)",
+        inline=True
+    )
+    embed.add_field(
+        name="🗺️ Battleground",
+        value=f"**{map_name or 'TBA'}**",
+        inline=True
+    )
+    embed.add_field(
+        name="🕒 Match Time",
+        value=f"<t:{match_time_unix}:F>\n(<t:{match_time_unix}:R>)",
+        inline=True
+    )
+    embed.add_field(
+        name="⏳ Countdown",
+        value=f"**{countdown}** remaining",
+        inline=True
+    )
+    embed.add_field(
+        name="✅ Pre-Match Checklist",
+        value=(
+            "▸ 📶 Stable internet & charged device\n"
+            "▸ 🎧 Squad voice channel joined\n"
+            "▸ 🔑 Watch DMs for room credentials\n"
+            "▸ 🚪 Be in lobby 5 minutes early"
+        ),
+        inline=False
+    )
+    embed.set_footer(text=f"🐺 {server_name} • Automated Match Reminder")
+    return embed

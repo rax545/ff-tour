@@ -58,3 +58,23 @@ SERVER_NAME_CLEAN = os.getenv('SERVER_NAME_CLEAN', 'Root LU')
 TAGLINE = 'Leading University Free Fire Esports League'
 
 DEVELOPER = os.getenv('DEVELOPER', 'Joy')
+
+
+# টাইমজোন অফসেট (ম্যাচ রিমাইন্ডার শিডিউলিং-এর জন্য), ডিফল্ট: +06:00 (Asia/Dhaka)
+def _parse_tz_offset(val: str) -> int:
+    """Parse '+06:00' / '-05:30' / '6' style UTC offsets into minutes."""
+    val = (val or '').strip()
+    if not val:
+        return 360
+    sign = -1 if val.startswith('-') else 1
+    val = val.lstrip('+-')
+    try:
+        if ':' in val:
+            hours, minutes = val.split(':', 1)
+            return sign * (int(hours) * 60 + int(minutes))
+        return sign * int(float(val) * 60)
+    except (ValueError, TypeError):
+        return 360
+
+
+TZ_OFFSET_MINUTES = _parse_tz_offset(os.getenv('TIMEZONE_UTC_OFFSET', '+06:00'))

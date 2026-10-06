@@ -16,6 +16,13 @@ A high-end, production-grade Free Fire esports tournament Discord management bot
   5. ⚡ **NexTerra** (Futuristic Battlefield & Anti-Gravity Zones)
 - 👥 **`/team create` with Batch & Section Support:** Register squads with `batch` and `section` metadata (with automatic autofill from verified student profiles).
 
+### ⏰ Match Reminders & Schedule Notifications
+- ⏰ **`/reminder set <match_id> <when> [offsets] [channel]` — Automated Match Reminders:** Staff lock in a match time (`2026-10-07 21:00`, `today 9:00 PM`, `tomorrow 20:30`, or just `21:00`) and the bot automatically fires countdown reminders at configurable offsets (default **60, 15 & 5 minutes** before the match) — both as channel announcements and personal DMs to every registered squad captain & member.
+- 📋 **`/reminder list [tournament_id]` — Upcoming Reminder Schedule:** View all pending reminders with live Discord relative timestamps (`in 42 minutes`).
+- 🚫 **`/reminder cancel <match_id>` — Cancel Reminders:** Instantly cancel every pending reminder for a match when schedules change.
+- 🌏 **Timezone Aware:** Times are interpreted in your configured local timezone (`TIMEZONE_UTC_OFFSET`, default `+06:00` Asia/Dhaka) and rendered with Discord `<t:...>` timestamps so every member sees their own local time.
+- 🔁 **Reliable Background Dispatcher:** A 30-second background loop delivers due reminders, survives bot restarts (reminders persist in SQLite), auto-skips past offsets, and cascades clean-up when matches are deleted.
+
 ### 🐺 Tournament & Esports Core Features
 - 🐺 **Dynamic Tournament Banners:** High-resolution banners auto-generated via Pillow (PIL) featuring server branding (**Root LU**), tournament title, prize pool, squad slots, entry fee, and wolf crests.
 - 👥 **Full 4+1 Squad Lineups & Roles:** Register complete 4-player active rosters + 1 optional 5th player (Extra Substitute) with official Free Fire roles (IGL, Rusher, Sniper, Assaulter, Support, Substitute).
@@ -42,6 +49,8 @@ MANAGER_ROLE_ID=your_manager_role_id_here
 SERVER_NAME=Root LU
 BRAND=Root LU
 DATABASE_PATH=data/esports.sqlite3
+# Optional: local timezone for /reminder set times (default +06:00 Asia/Dhaka)
+TIMEZONE_UTC_OFFSET=+06:00
 ```
 
 Start the bot:
