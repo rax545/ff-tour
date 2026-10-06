@@ -197,6 +197,30 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT
 );
+
+
+CREATE TABLE IF NOT EXISTS reminders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_id INTEGER NOT NULL,
+    tournament_id INTEGER NOT NULL,
+    channel_id INTEGER DEFAULT 0,
+    match_time TEXT NOT NULL,
+    remind_at TEXT NOT NULL,
+    offset_minutes INTEGER NOT NULL,
+    status TEXT DEFAULT 'pending',
+    created_by INTEGER,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE(match_id, offset_minutes),
+
+    FOREIGN KEY (match_id)
+        REFERENCES matches(id)
+        ON DELETE CASCADE,
+
+    FOREIGN KEY (tournament_id)
+        REFERENCES tournaments(id)
+        ON DELETE CASCADE
+);
 """
 
 
