@@ -3,7 +3,7 @@ from discord.ext import commands
 from discord import app_commands
 
 from config import SERVER_NAME
-from database.db import connect, audit
+from database.db import connect, audit, set_setting
 from utils.embeds import base, ok, err
 from utils.permissions import require_staff
 
@@ -47,6 +47,33 @@ class Admin(commands.Cog):
         )
         e.set_footer(text=f"🐺 {SERVER_NAME} • Elite Operations")
         await interaction.response.send_message(embed=e, ephemeral=True)
+
+    @admin.command(name="notifychannel", description="Set the live broadcast notification channel")
+    @app_commands.describe(channel="Channel where live stream announcements will be posted")
+    async def notifychannel(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel
+    ):
+        if not await require_staff(interaction):
+            return
+
+        if interaction.guild and channel.guild.id != interaction.guild.id:
+            return await interaction.response.send_message(
+                embed=err("Please select a channel from this server."),
+                ephemeral=True
+            )
+
+        await set_setting("notification_channel_id", channel.id)
+        await audit(
+            interaction.user.id,
+            "notification_channel_set",
+            str(channel.id)
+        )
+        await interaction.response.send_message(
+            embed=ok(f"Live broadcast notifications will be posted in {channel.mention}."),
+            ephemeral=True
+        )
 
     @admin.command(name="payment", description="Approve or reject team registration payment")
     @app_commands.describe(
