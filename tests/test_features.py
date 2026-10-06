@@ -3,12 +3,15 @@ import io
 import os
 import sys
 import unittest
+import tempfile
+from unittest import mock
 import aiosqlite
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import SERVER_NAME, BRAND
-from database.db import connect, init_db
+import database.db as db_module
+from database.db import connect, init_db, get_setting, set_setting
 from services.scoring import calculate
 from services.leaderboard import leaderboard, section_leaderboard, top_fraggers
 from utils.banner import (
@@ -336,6 +339,48 @@ class FeatureTests(unittest.IsolatedAsyncioTestCase):
         card_buf = live_broadcast("LU Broadcast Cup", 1, "Bermuda", "YouTube")
         self.assertIsInstance(card_buf, io.BytesIO)
         self.assertGreater(len(card_buf.getvalue()), 10000)
+
+    async def test_08_settings_upsert(self):
+        key = "test_notification_channel"
+        await set_setting(key, "111")
+        self.assertEqual(await get_setting(key), "111")
+        await set_setting(key, "222")
+        self.assertEqual(await get_setting(key), "222")
+        self.assertEqual(await get_setting("missing_test_setting", "fallback"), "fallback")
+
+        db = await connect()
+        cur = await db.execute("SELECT COUNT(*) AS c FROM settings WHERE key=?", (key,))
+        self.assertEqual((await cur.fetchone())["c"], 1)
+        await db.execute("DELETE FROM settings WHERE key=?", (key,))
+        await db.commit()
+        await db.close()
+
+    async def test_09_backward_compatible_stream_migration(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            legacy_path = os.path.join(tmp, "legacy.sqlite3")
+            legacy = await aiosqlite.connect(legacy_path)
+            await legacy.executescript("""
+                CREATE TABLE tournaments (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+                CREATE TABLE matches (
+                    id INTEGER PRIMARY KEY,
+                    tournament_id INTEGER NOT NULL,
+                    match_no INTEGER NOT NULL,
+                    map TEXT
+                );
+            """)
+            await legacy.commit()
+            await legacy.close()
+
+            with mock.patch.object(db_module, "DATABASE_PATH", legacy_path):
+                await db_module.init_db()
+                migrated = await db_module.connect()
+                cur = await migrated.execute("PRAGMA table_info(matches)")
+                columns = {row[1] for row in await cur.fetchall()}
+                await migrated.close()
+
+            self.assertTrue(
+                {"stream_url", "stream_platform", "stream_live"}.issubset(columns)
+            )
 
 
 if __name__ == "__main__":

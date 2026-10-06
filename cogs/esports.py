@@ -4,7 +4,7 @@ from discord.ext import commands
 from discord import app_commands
 
 from config import SERVER_NAME, BRAND
-from database.db import connect, audit
+from database.db import connect, audit, get_setting
 from services.scoring import calculate
 from services.leaderboard import leaderboard, section_leaderboard, top_fraggers
 from utils.banner import generate_tournament_banner, generate_match_banner
@@ -29,6 +29,17 @@ ROLE_CHOICES = [
     app_commands.Choice(name="🛡️ Support (Utility / Grenadier)", value="Support"),
     app_commands.Choice(name="🔄 Substitute (5th / Extra Player)", value="Substitute"),
 ]
+
+def stream_link_view(stream_url, platform):
+    """Build a stateless Discord link view for public announcements and DMs."""
+    view = discord.ui.View()
+    view.add_item(discord.ui.Button(
+        label=f"📺 Watch Live on {platform}"[:80],
+        style=discord.ButtonStyle.link,
+        url=stream_url
+    ))
+    return view
+
 
 ROLE_BADGES = {
     "IGL": "👑 IGL",
@@ -1705,7 +1716,8 @@ class Esports(commands.Cog):
                                 f"📡 **{team_info['name']} [{team_info['tag']}]**, Match #{match['match_no']} is streaming now!"
                             ),
                             embed=dm_embed,
-                            files=[discord.File(io.BytesIO(broadcast_card_bytes), filename="live_broadcast.png")]
+                            files=[discord.File(io.BytesIO(broadcast_card_bytes), filename="live_broadcast.png")],
+                            view=stream_link_view(stream_url, platform)
                         )
                         sent += 1
                     except discord.Forbidden:
@@ -1747,10 +1759,34 @@ class Esports(commands.Cog):
         )
         embed.set_footer(text=f"🐺 {SERVER_NAME} • Live Broadcast Center")
 
-        await interaction.followup.send(
-            embed=embed,
-            file=broadcast_file
-        )
+        # Prefer the server's configured announcement channel. If it is unset,
+        # deleted, or inaccessible, post where the command was invoked.
+        target_channel = interaction.channel
+        configured_channel_id = await get_setting("notification_channel_id")
+        if configured_channel_id and interaction.guild:
+            try:
+                target_channel = interaction.guild.get_channel(int(configured_channel_id))
+                if target_channel is None:
+                    target_channel = await interaction.guild.fetch_channel(int(configured_channel_id))
+            except (ValueError, discord.HTTPException, discord.Forbidden):
+                target_channel = interaction.channel
+
+        view = stream_link_view(stream_url, platform)
+        if target_channel and target_channel.id != interaction.channel_id:
+            await target_channel.send(embed=embed, file=broadcast_file, view=view)
+            await interaction.followup.send(
+                embed=ok(
+                    f"Live broadcast posted in {target_channel.mention}. "
+                    f"Sent **{sent}** member DM(s); **{failed}** failed."
+                ),
+                ephemeral=True
+            )
+        else:
+            await interaction.followup.send(
+                embed=embed,
+                file=broadcast_file,
+                view=view
+            )
 
     # =========================================================
     # RESULT SUBMIT

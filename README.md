@@ -28,7 +28,8 @@ A high-end, production-grade Free Fire esports tournament Discord management bot
 - 👥 **Full 4+1 Squad Lineups & Roles:** Register complete 4-player active rosters + 1 optional 5th player (Extra Substitute) with official Free Fire roles (IGL, Rusher, Sniper, Assaulter, Support, Substitute).
 - ⚡ **OG Squad Match Dispatches:** `/match create` automatically delivers personalized OG battle notice DMs to all registered squad captains and members with team names, 4+1 roster breakdown, map, and schedule.
 - 🔑 **OG Room Credentials Release:** `/match room` sends copyable Room ID & Password directly to captains' DMs with access passes.
-- 🔴 **Live Stream Broadcast Notifications:** `/match stream <match_id> <stream_url> [platform]` instantly generates an HD (1280x720) "LIVE NOW" broadcast card via Pillow and DMs every registered squad member/captain with a clickable stream link the moment staff goes live. The live status and stream link are also surfaced automatically in `/tournament fixtures`.
+- 🔴 **Live Stream Broadcast Notifications:** `/match stream <match_id> <stream_url> <platform>` instantly generates a red-accented HD (1280x720) "LIVE NOW" card, posts it with a **Watch Live** link button in the configured notification channel, and DMs every registered squad captain **and member** with the card, embed, and clickable link. `/tournament fixtures` also surfaces the live status and stream link.
+- 📢 **Configurable Notification Channel:** Staff can run `/admin notifychannel <channel>` to persist the broadcast destination in SQLite. If none is configured (or the saved channel is unavailable), broadcasts fall back to the channel where `/match stream` was run.
 - 📊 **Scoring & Verification:** Captains submit match placements and kills (`/result submit`), staff verifies scores (`/result verify`), and standings update live.
 - 🛡️ **Admin Command Center:** `/admin dashboard`, payment approval/rejection workflows, and audit logging.
 - 🎫 **Support Tickets:** `/ticket` creates private text channels for tournament inquiries and dispute resolution.
@@ -81,6 +82,8 @@ python bot.py
 ### 🎮 Match Commands
 - `/match create <tournament_id> <match_no> <map_name> [scheduled_at]` — Create match & dispatch DMs.
 - `/match room <match_id> <room_id> <password>` — Release room credentials to captains.
+- `/match stream <match_id> <stream_url> <platform>` — Start a live broadcast announcement and notify all registered players.
+- `/admin notifychannel <channel>` — Set the server's persistent live-notification channel (staff only).
 
 ### 📊 Result Commands
 - `/result submit <match_id> <team_id> <placement> <kills>` — Submit squad match result.

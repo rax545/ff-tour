@@ -314,6 +314,33 @@ async def init_db():
         await db.close()
 
 
+async def get_setting(key, default=None):
+    """Return a persisted bot setting, or ``default`` when it is unset."""
+    db = await connect()
+    try:
+        cur = await db.execute("SELECT value FROM settings WHERE key=?", (str(key),))
+        row = await cur.fetchone()
+        return row["value"] if row else default
+    finally:
+        await db.close()
+
+
+async def set_setting(key, value):
+    """Create or atomically update a persisted bot setting."""
+    db = await connect()
+    try:
+        await db.execute(
+            """
+            INSERT INTO settings(key, value) VALUES(?, ?)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value
+            """,
+            (str(key), str(value))
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
 async def audit(
     actor_id,
     action,
