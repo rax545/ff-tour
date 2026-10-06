@@ -42,3 +42,11 @@ def booyah(team, tournament, points):
 
 def mvp(player, team, kills):
     return card(1100, 500, 'MVP // CYBERPUNK', team, [player, f'{kills} TEAM KILLS'], (255, 40, 186))
+
+
+def live_broadcast(tournament, match_no, map_name, platform):
+    return card(1280, 720, 'LIVE NOW - ON AIR', tournament,
+                [f'MATCH #{match_no}  |  MAP: {map_name}',
+                 f'WATCH LIVE ON {str(platform).upper()}',
+                 'TUNE IN NOW - DO NOT MISS THE ACTION'],
+                (239, 68, 68))

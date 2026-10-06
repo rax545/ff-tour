@@ -94,6 +94,9 @@ CREATE TABLE IF NOT EXISTS matches (
     room_id TEXT DEFAULT '',
     room_password TEXT DEFAULT '',
     status TEXT DEFAULT 'scheduled',
+    stream_url TEXT DEFAULT '',
+    stream_platform TEXT DEFAULT '',
+    stream_live INTEGER DEFAULT 0,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
 
     UNIQUE(tournament_id, match_no),
@@ -265,6 +268,19 @@ async def init_db():
                 await db.execute("ALTER TABLE teams ADD COLUMN batch TEXT DEFAULT ''")
             if "section" not in cols:
                 await db.execute("ALTER TABLE teams ADD COLUMN section TEXT DEFAULT ''")
+        except Exception:
+            pass
+
+        # Migration: ensure matches table has live stream broadcast columns
+        try:
+            cur = await db.execute("PRAGMA table_info(matches)")
+            cols = [r[1] for r in await cur.fetchall()]
+            if "stream_url" not in cols:
+                await db.execute("ALTER TABLE matches ADD COLUMN stream_url TEXT DEFAULT ''")
+            if "stream_platform" not in cols:
+                await db.execute("ALTER TABLE matches ADD COLUMN stream_platform TEXT DEFAULT ''")
+            if "stream_live" not in cols:
+                await db.execute("ALTER TABLE matches ADD COLUMN stream_live INTEGER DEFAULT 0")
         except Exception:
             pass
 

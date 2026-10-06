@@ -145,6 +145,66 @@ def og_match_dm_embed(
     return embed
 
 
+def stream_live_dm_embed(
+    team_name: str,
+    team_tag: str,
+    tournament_name: str,
+    match_no: int,
+    match_id: int,
+    map_name: str,
+    platform: str,
+    stream_url: str,
+    server_name: str = SERVER_NAME
+) -> discord.Embed:
+    """
+    Live Stream Broadcast Notification embed sent to registered squads in DM
+    the moment staff goes live with `/match stream`.
+    """
+    desc = (
+        f"```diff\n"
+        f"+ 🔴 {server_name} • LIVE BROADCAST STARTED +\n"
+        f"```\n"
+        f"### 📡 **WE ARE LIVE • {team_name} [{team_tag}]** 📡\n\n"
+        f"**Match #{match_no}** of **{tournament_name}** is now streaming LIVE!\n"
+        f"Tune in, cheer your squad, and watch every kill unfold in real time."
+    )
+    embed = discord.Embed(
+        title=f"🔴 {server_name} • LIVE NOW",
+        description=desc,
+        color=discord.Color.from_rgb(239, 68, 68),  # Broadcast Red
+        timestamp=discord.utils.utcnow()
+    )
+    embed.add_field(
+        name="🛡️ Your Squad",
+        value=f"**{team_name}** `[{team_tag}]`",
+        inline=True
+    )
+    embed.add_field(
+        name="🎮 Match Round",
+        value=f"**Match #{match_no}** (ID: `#{match_id}`)",
+        inline=True
+    )
+    embed.add_field(
+        name="🗺️ Map",
+        value=f"**{map_name}**",
+        inline=True
+    )
+    embed.add_field(
+        name="📡 Platform",
+        value=f"**{platform}**",
+        inline=True
+    )
+    embed.add_field(
+        name="🔗 Watch Live",
+        value=f"[Click here to watch]({stream_url})",
+        inline=False
+    )
+    embed.set_footer(
+        text=f"🐺 {server_name} • Live Broadcast Center"
+    )
+    return embed
+
+
 def og_room_dm_embed(
     team_name: str,
     team_tag: str,
