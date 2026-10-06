@@ -1,3 +1,4 @@
+import io
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -7,9 +8,9 @@ from database.db import connect, audit
 from services.scoring import calculate
 from services.leaderboard import leaderboard, section_leaderboard, top_fraggers
 from utils.banner import generate_tournament_banner, generate_match_banner
-from utils.embeds import base, ok, err, og_match_dm_embed, og_room_dm_embed
+from utils.embeds import base, ok, err, og_match_dm_embed, og_room_dm_embed, stream_live_dm_embed
 from utils.permissions import require_staff
-from utils.cards import room_pass, points_table, booyah, mvp
+from utils.cards import room_pass, points_table, booyah, mvp, live_broadcast
 from views.panels import TournamentPanel
 
 OFFICIAL_5_MAP_ROTATION = [
@@ -1540,6 +1541,218 @@ class Esports(commands.Cog):
         await interaction.followup.send(embed=embed)
 
     # =========================================================
+    # MATCH LIVE STREAM BROADCAST
+    # =========================================================
+
+    @match.command(
+        name="stream",
+        description="Go live! Broadcast a stream link, generate an HD card, and DM all registered squads"
+    )
+    @app_commands.describe(
+        match_id="Match ID",
+        stream_url="Live stream URL (YouTube / Facebook / Twitch)",
+        platform="Streaming platform name (e.g. YouTube, Facebook, Twitch)"
+    )
+    async def stream(
+        self,
+        interaction: discord.Interaction,
+        match_id: int,
+        stream_url: str,
+        platform: str = "YouTube"
+    ):
+        if not await require_staff(interaction):
+            return
+
+        stream_url = stream_url.strip()
+        platform = platform.strip() or "YouTube"
+
+        if not stream_url.lower().startswith(("http://", "https://")):
+            return await interaction.response.send_message(
+                embed=err("Stream URL must be a valid link starting with http:// or https://."),
+                ephemeral=True
+            )
+
+        await interaction.response.defer()
+
+        db = await connect()
+
+        try:
+            cur = await db.execute(
+                """
+                SELECT
+                    m.id,
+                    m.match_no,
+                    m.map,
+                    m.tournament_id,
+                    t.name AS tournament_name
+                FROM matches m
+                JOIN tournaments t ON m.tournament_id = t.id
+                WHERE m.id=?
+                """,
+                (match_id,)
+            )
+
+            match = await cur.fetchone()
+
+            if not match:
+                await db.close()
+
+                return await interaction.followup.send(
+                    embed=err("Match not found."),
+                    ephemeral=True
+                )
+
+            await db.execute(
+                """
+                UPDATE matches
+                SET
+                    stream_url=?,
+                    stream_platform=?,
+                    stream_live=1
+                WHERE id=?
+                """,
+                (
+                    stream_url,
+                    platform,
+                    match_id
+                )
+            )
+
+            cur = await db.execute(
+                """
+                SELECT DISTINCT t.id, t.name, t.tag, t.captain_id
+                FROM teams t
+                WHERE t.tournament_id=?
+                UNION
+                SELECT DISTINCT t.id, t.name, t.tag, t.captain_id
+                FROM teams t
+                JOIN registrations r ON t.id = r.team_id
+                WHERE r.tournament_id=?
+                """,
+                (match["tournament_id"], match["tournament_id"])
+            )
+
+            teams = await cur.fetchall()
+
+            # Collect all squad members too (not just captains) for the broadcast
+            team_recipients = {}
+            for tm in teams:
+                cur = await db.execute(
+                    "SELECT user_id FROM team_members WHERE team_id=?",
+                    (tm["id"],)
+                )
+                m_rows = await cur.fetchall()
+                uids = {tm["captain_id"]}
+                for mr in m_rows:
+                    if mr["user_id"] and mr["user_id"] > 0:
+                        uids.add(mr["user_id"])
+                team_recipients[tm["id"]] = (tm, uids)
+
+            await db.commit()
+
+        except Exception as e:
+            await db.rollback()
+            await db.close()
+
+            return await interaction.followup.send(
+                embed=err(
+                    f"Failed to start live broadcast.\n```{e}```"
+                ),
+                ephemeral=True
+            )
+
+        await db.close()
+
+        map_name = match["map"] or "TBA"
+
+        # Generate the HD (1280x720) LIVE NOW broadcast card
+        broadcast_card_bytes = live_broadcast(
+            match["tournament_name"],
+            match["match_no"],
+            map_name,
+            platform
+        ).getvalue()
+
+        sent = 0
+        failed = 0
+
+        for t_id, (team_info, uids) in team_recipients.items():
+            dm_embed = stream_live_dm_embed(
+                team_name=team_info["name"],
+                team_tag=team_info["tag"],
+                tournament_name=match["tournament_name"],
+                match_no=match["match_no"],
+                match_id=match_id,
+                map_name=map_name,
+                platform=platform,
+                stream_url=stream_url,
+                server_name=SERVER_NAME
+            )
+
+            for uid in uids:
+                user = interaction.guild.get_member(uid)
+                if not user:
+                    try:
+                        user = await self.bot.fetch_user(uid)
+                    except Exception:
+                        user = None
+
+                if user:
+                    try:
+                        await user.send(
+                            content=(
+                                f"🔴 **[ {SERVER_NAME} • WE ARE LIVE ]** 🔴\n"
+                                f"📡 **{team_info['name']} [{team_info['tag']}]**, Match #{match['match_no']} is streaming now!"
+                            ),
+                            embed=dm_embed,
+                            files=[discord.File(io.BytesIO(broadcast_card_bytes), filename="live_broadcast.png")]
+                        )
+                        sent += 1
+                    except discord.Forbidden:
+                        failed += 1
+                    except Exception:
+                        failed += 1
+
+        broadcast_file = discord.File(
+            io.BytesIO(broadcast_card_bytes),
+            filename="live_broadcast.png"
+        )
+
+        embed = discord.Embed(
+            title=f"🔴 LIVE NOW — MATCH #{match['match_no']} IS STREAMING!",
+            description=(
+                f"```diff\n"
+                f"+ 🐺 {SERVER_NAME} • LIVE BROADCAST ACTIVE +\n"
+                f"```\n"
+                f"**{match['tournament_name']}** — Match **#{match['match_no']}** is now LIVE on **{platform}**!\n"
+                f"🔗 **[Watch the stream here]({stream_url})**"
+            ),
+            color=discord.Color.from_rgb(239, 68, 68),
+            timestamp=discord.utils.utcnow()
+        )
+        embed.set_image(url="attachment://live_broadcast.png")
+        embed.add_field(name="🏆 Tournament", value=f"**{match['tournament_name']}**", inline=True)
+        embed.add_field(name="🎮 Match Round", value=f"**Match #{match['match_no']}**", inline=True)
+        embed.add_field(name="🗺️ Map", value=f"**{map_name}**", inline=True)
+        embed.add_field(name="📡 Platform", value=f"**{platform}**", inline=True)
+        embed.add_field(name="🐺 Host", value=f"**{SERVER_NAME}**", inline=True)
+        embed.add_field(
+            name="📨 Broadcast Notification Report",
+            value=(
+                f"👥 Registered Squads: **{len(teams)}**\n"
+                f"✅ DMs Sent: **{sent}**"
+                + (f"\n⚠️ DMs Closed/Failed: **{failed}**" if failed > 0 else "")
+            ),
+            inline=False
+        )
+        embed.set_footer(text=f"🐺 {SERVER_NAME} • Live Broadcast Center")
+
+        await interaction.followup.send(
+            embed=embed,
+            file=broadcast_file
+        )
+
+    # =========================================================
     # RESULT SUBMIT
     # =========================================================
 
@@ -1913,10 +2126,18 @@ class Esports(commands.Cog):
                     status_badge = "🟢 Completed"
 
                 map_display = m["map"] or f"Map #{m['match_no']}"
+                stream_line = ""
+                try:
+                    if m["stream_live"]:
+                        platform = m["stream_platform"] or "Stream"
+                        stream_line = f"\n▸ 📡 **LIVE NOW on {platform}:** [Watch here]({m['stream_url']})"
+                except (IndexError, KeyError):
+                    pass
+
                 match_lines.append(
                     f"🎮 **Match #{m['match_no']}** (ID: `#{m['id']}`)\n"
                     f"▸ 🗺️ Map: **{map_display}** • ⏰ Drop Time: `{m['scheduled_at']}`\n"
-                    f"▸ 📊 Status: **{status_badge}**"
+                    f"▸ 📊 Status: **{status_badge}**{stream_line}"
                 )
             embed.add_field(
                 name=f"⚔️ Scheduled Matches ({len(scheduled_matches)})",

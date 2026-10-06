@@ -21,6 +21,7 @@ A high-end, production-grade Free Fire esports tournament Discord management bot
 - 👥 **Full 4+1 Squad Lineups & Roles:** Register complete 4-player active rosters + 1 optional 5th player (Extra Substitute) with official Free Fire roles (IGL, Rusher, Sniper, Assaulter, Support, Substitute).
 - ⚡ **OG Squad Match Dispatches:** `/match create` automatically delivers personalized OG battle notice DMs to all registered squad captains and members with team names, 4+1 roster breakdown, map, and schedule.
 - 🔑 **OG Room Credentials Release:** `/match room` sends copyable Room ID & Password directly to captains' DMs with access passes.
+- 🔴 **Live Stream Broadcast Notifications:** `/match stream <match_id> <stream_url> [platform]` instantly generates an HD (1280x720) "LIVE NOW" broadcast card via Pillow and DMs every registered squad member/captain with a clickable stream link the moment staff goes live. The live status and stream link are also surfaced automatically in `/tournament fixtures`.
 - 📊 **Scoring & Verification:** Captains submit match placements and kills (`/result submit`), staff verifies scores (`/result verify`), and standings update live.
 - 🛡️ **Admin Command Center:** `/admin dashboard`, payment approval/rejection workflows, and audit logging.
 - 🎫 **Support Tickets:** `/ticket` creates private text channels for tournament inquiries and dispute resolution.

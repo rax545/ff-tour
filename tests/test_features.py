@@ -22,8 +22,10 @@ from utils.embeds import (
     ok,
     err,
     og_match_dm_embed,
-    og_room_dm_embed
+    og_room_dm_embed,
+    stream_live_dm_embed
 )
+from utils.cards import live_broadcast
 from cogs.esports import OFFICIAL_5_MAP_ROTATION
 
 
@@ -268,6 +270,72 @@ class FeatureTests(unittest.IsolatedAsyncioTestCase):
         actual_maps = [m[1] for m in OFFICIAL_5_MAP_ROTATION]
         self.assertEqual(actual_maps, expected_maps)
         self.assertEqual(len(OFFICIAL_5_MAP_ROTATION), 5)
+
+    async def test_07_live_stream_broadcast_notification(self):
+        """Feature 7: /match stream - Live stream broadcast notification + HD card"""
+        db = await connect()
+
+        # Create tournament, team and match
+        cur = await db.execute("INSERT INTO tournaments (name) VALUES ('LU Broadcast Cup')")
+        t_id = cur.lastrowid
+
+        cur = await db.execute(
+            "INSERT INTO teams (tournament_id, name, tag, captain_id, batch, section) "
+            "VALUES (?, 'Root Broadcasters', 'RB', 4001, '60', 'C')",
+            (t_id,)
+        )
+        team_id = cur.lastrowid
+
+        cur = await db.execute(
+            "INSERT INTO matches (tournament_id, match_no, map, scheduled_at) VALUES (?, 1, 'Bermuda', 'Tonight 9 PM')",
+            (t_id,)
+        )
+        match_id = cur.lastrowid
+        await db.commit()
+
+        # Columns should exist and default to offline/empty
+        cur = await db.execute("SELECT stream_url, stream_platform, stream_live FROM matches WHERE id=?", (match_id,))
+        row = await cur.fetchone()
+        self.assertEqual(row["stream_url"], "")
+        self.assertEqual(row["stream_platform"], "")
+        self.assertEqual(row["stream_live"], 0)
+
+        # Simulate /match stream going live
+        await db.execute(
+            "UPDATE matches SET stream_url=?, stream_platform=?, stream_live=1 WHERE id=?",
+            ("https://youtube.com/watch?v=root-lu-live", "YouTube", match_id)
+        )
+        await db.commit()
+
+        cur = await db.execute("SELECT stream_url, stream_platform, stream_live FROM matches WHERE id=?", (match_id,))
+        row = await cur.fetchone()
+        self.assertEqual(row["stream_url"], "https://youtube.com/watch?v=root-lu-live")
+        self.assertEqual(row["stream_platform"], "YouTube")
+        self.assertEqual(row["stream_live"], 1)
+
+        await db.close()
+
+        # DM embed should surface the clickable stream link and squad info
+        dm_embed = stream_live_dm_embed(
+            team_name="Root Broadcasters",
+            team_tag="RB",
+            tournament_name="LU Broadcast Cup",
+            match_no=1,
+            match_id=match_id,
+            map_name="Bermuda",
+            platform="YouTube",
+            stream_url="https://youtube.com/watch?v=root-lu-live",
+            server_name=SERVER_NAME
+        )
+        self.assertIn("LIVE", dm_embed.title)
+        field_values = " ".join(f.value for f in dm_embed.fields)
+        self.assertIn("Root Broadcasters", field_values)
+        self.assertIn("https://youtube.com/watch?v=root-lu-live", field_values)
+
+        # HD broadcast card must be a real 1280x720 PNG
+        card_buf = live_broadcast("LU Broadcast Cup", 1, "Bermuda", "YouTube")
+        self.assertIsInstance(card_buf, io.BytesIO)
+        self.assertGreater(len(card_buf.getvalue()), 10000)
 
 
 if __name__ == "__main__":
