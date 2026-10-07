@@ -1,16 +1,18 @@
 import io
+import asyncio
 import discord
 from discord.ext import commands
 from discord import app_commands
 
 from config import SERVER_NAME, BRAND
 from database.db import connect, audit, get_setting
+from services.arena import validate_stream_url, stream_status
 from services.scoring import calculate
 from services.leaderboard import leaderboard, section_leaderboard, top_fraggers
 from utils.banner import generate_tournament_banner, generate_match_banner
 from utils.embeds import base, ok, err, og_match_dm_embed, og_room_dm_embed, stream_live_dm_embed
 from utils.permissions import require_staff
-from utils.cards import room_pass, points_table, booyah, mvp, live_broadcast
+from utils.cards import room_pass, points_table, booyah, mvp, live_broadcast, slot_grid
 from views.panels import TournamentPanel
 
 OFFICIAL_5_MAP_ROTATION = [
@@ -1551,6 +1553,35 @@ class Esports(commands.Cog):
 
         await interaction.followup.send(embed=embed)
 
+    @match.command(name="streamstop", description="Staff: end a live stream while retaining its replay link")
+    async def streamstop(self, interaction: discord.Interaction, match_id: int):
+        if not await require_staff(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        row = await stream_status(match_id, stop=True)
+        if not row:
+            return await interaction.followup.send(embed=err("Match not found."), ephemeral=True)
+        await audit(interaction.user.id, "stream_stop", str(match_id))
+        await interaction.followup.send(embed=ok("Stream marked offline. Replay link retained."), ephemeral=True)
+
+    @match.command(name="streamstatus", description="View a match's live status or replay link")
+    async def streamstatus(self, interaction: discord.Interaction, match_id: int):
+        await interaction.response.defer()
+        row = await stream_status(match_id)
+        if not row:
+            return await interaction.followup.send(embed=err("Match not found."), ephemeral=True)
+        embed = base(f"Match #{row['match_no']} • {'LIVE' if row['stream_live'] else 'OFFLINE'}",
+                     row['tournament_name'])
+        view = discord.ui.View()
+        if row['stream_url']:
+            try:
+                url = validate_stream_url(row['stream_url'])
+                view.add_item(discord.ui.Button(label="Watch Live" if row['stream_live'] else "Watch Replay",
+                                                url=url))
+            except ValueError:
+                pass
+        await interaction.followup.send(embed=embed, view=view)
+
     # =========================================================
     # MATCH LIVE STREAM BROADCAST
     # =========================================================
@@ -1577,11 +1608,12 @@ class Esports(commands.Cog):
         stream_url = stream_url.strip()
         platform = platform.strip() or "YouTube"
 
-        if not stream_url.lower().startswith(("http://", "https://")):
-            return await interaction.response.send_message(
-                embed=err("Stream URL must be a valid link starting with http:// or https://."),
-                ephemeral=True
-            )
+        try:
+            stream_url = validate_stream_url(stream_url)
+        except ValueError as exc:
+            return await interaction.response.send_message(embed=err(str(exc)), ephemeral=True)
+        if len(platform) > 40:
+            return await interaction.response.send_message(embed=err("Platform must be 40 characters or fewer."), ephemeral=True)
 
         await interaction.response.defer()
 
@@ -2560,15 +2592,16 @@ class Esports(commands.Cog):
 
 
     @tournament.command(name="slots", description="Show registered lobby slots")
-    async def slots(self, interaction: discord.Interaction, tournament_id: int, page: int = 1):
+    async def slots(self, interaction: discord.Interaction, tournament_id: int, page: int = 1, graphical: bool = False):
         if page < 1 or tournament_id < 1:
             return await interaction.response.send_message(embed=err("Invalid tournament or page."), ephemeral=True)
+        await interaction.response.defer()
         db = await connect()
         try:
             cur = await db.execute("SELECT name, max_teams FROM tournaments WHERE id=?", (tournament_id,))
             tournament = await cur.fetchone()
             if not tournament:
-                return await interaction.response.send_message(embed=err("Tournament not found."), ephemeral=True)
+                return await interaction.followup.send(embed=err("Tournament not found."), ephemeral=True)
             cur = await db.execute("""SELECT DISTINCT id, name, tag FROM teams WHERE tournament_id=?
                 UNION SELECT DISTINCT t.id, t.name, t.tag FROM teams t
                 JOIN registrations r ON r.team_id=t.id WHERE r.tournament_id=? ORDER BY id""",
@@ -2576,13 +2609,19 @@ class Esports(commands.Cog):
             teams = await cur.fetchall()
         finally:
             await db.close()
+        if graphical:
+            try:
+                image = await asyncio.to_thread(slot_grid, tournament["name"], teams, tournament["max_teams"], page)
+            except ValueError as exc:
+                return await interaction.followup.send(embed=err(str(exc)), ephemeral=True)
+            return await interaction.followup.send(file=discord.File(image, filename="slot-grid.png"))
         start = (page - 1) * 40 + 1
         end = min(page * 40, tournament["max_teams"])
         if start > tournament["max_teams"]:
-            return await interaction.response.send_message(embed=err("Page has no slots."), ephemeral=True)
+            return await interaction.followup.send(embed=err("Page has no slots."), ephemeral=True)
         lines = [f"`{i:02d}` {teams[i-1]['name']} [{teams[i-1]['tag']}]" if i <= len(teams) else f"`{i:02d}` — OPEN —" for i in range(start, end + 1)]
         embed = base(f"Lobby Slots • {tournament['name']}", "\n".join(lines)[:3900] or "No slots available.")
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
 
     @tournament.command(name="rules", description="Show tournament rulebook")
     async def rules(self, interaction: discord.Interaction):

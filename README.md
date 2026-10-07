@@ -93,3 +93,85 @@ python bot.py
 - `/result table <tournament_id> [page]` — Generate 1200x880 graphical points table.
 - `/result booyah <tournament_id>` — Generate golden Booyah winner card.
 - `/result mvp <tournament_id>` — Generate cyberpunk MVP card.
+
+## 🆕 Player Arena: passports, certificates, slot grid & squad rooms
+
+These features ship as part of the existing Discord bot (no separate website or
+stream-hosting service). Existing SQLite databases are upgraded automatically on
+startup; back up `DATABASE_PATH` before upgrading. No extra dependencies are needed.
+
+### Live stream lifecycle
+- `/match stream <match_id> <stream_url> [platform]` — staff broadcasts an HD live
+  card and Watch Live button using the existing announcement/DM workflow. Links
+  now receive structural validation; this does not check whether a stream is
+  actually online. Platform labels are limited to 40 characters.
+- `/match streamstatus <match_id>` — display LIVE/OFFLINE and a live/replay button.
+- `/match streamstop <match_id>` — staff marks a stream offline, retaining its URL
+  for replay. This does not finish the match or stop a stream on YouTube/Twitch.
+
+### Private player passport
+- `/passport` — generates a 1200×720 PNG visible only to the requesting player,
+  with linked IGN/Free Fire UID, roles, recent squad affiliations and batch/section.
+- Link a player's Discord account with `/team addplayer ... member:@player`.
+- Only **verified individual `player_results`** matching the linked UID and squad
+  contribute kills/damage. Squad result kills are never attributed to individuals.
+  Without individual result data the passport correctly shows zero recorded stats.
+- Student IDs and room credentials are not included. The graphic shows up to five
+  most recent roster entries; it is a roster summary, not identity authentication.
+
+### Digital certificate registry
+- `/certificate issue <tournament_id> <team_id> <recipient> <award>` — staff issues
+  a 1600×1000 achievement certificate for a registered captain/linked member.
+  Awards are staff attestations (e.g. `Champion`, `Participation`); standings do
+  not automatically determine eligibility.
+- The PNG and randomly generated registry code are returned privately to the
+  issuer for delivery to the recipient. Repeating an identical issuance returns
+  the same code, including under concurrent requests.
+- `/certificate verify <code>` — privately verify the recipient, award, tournament
+  and VALID/REVOKED status in the current server's SQLite registry.
+- `/certificate revoke <code>` — staff permanently revokes an award. Revoked
+  identical awards cannot be reissued; issue a distinct corrected award if needed.
+- A PNG is not a cryptographic signature: the registry is authoritative. Issuance
+  and revocation are audit-logged. Deleting a tournament/team cascades its registry
+  records; retain these rows and database backups for long-term verification.
+
+### Graphical slot grid
+- `/tournament slots <tournament_id> [page] graphical:true` — renders a 1440×1000
+  lobby grid, **24 slots/page**, showing occupied and open slots.
+- `graphical:false` (default) preserves the existing **40 slots/page** text list.
+- Positions are derived from ascending squad IDs, matching the text list. This is
+  a visualization, not a persistent/custom slot assignment; removing teams shifts
+  subsequent positions. Overflow registrations are not shown beyond max slots.
+
+### Squad war room
+- `/squad warroom <team_id>` — captain/staff creates private text **and** voice
+  channels. Re-running reuses saved channels and synchronizes access to the
+  current captain, linked roster members and configured staff roles. Removed
+  players lose explicit access when this command is run again.
+- `/squad close <team_id>` — captain/staff deletes both channels and saved IDs.
+- Channels deny `@everyone` viewing/voice access; server administrators can always
+  access channels. Bot permissions: **Manage Channels, View Channels, Send Messages,
+  Read Message History, Attach Files, Embed Links, Connect and Speak**. Enable the
+  existing Server Members intent in the Discord Developer Portal.
+- Channel IDs survive restarts; deleted channels are recreated on the next run.
+  Partial creation is rolled back, and repeated in-process requests are serialized.
+  Run one bot instance per database; cross-process Discord creation is not locked.
+- Close rooms before deleting a team/tournament: SQLite cascade cannot delete
+  remote Discord channels automatically.
+
+### Deployment and tests
+This repository uses a shared tournament database, not guild-partitioned tournament
+storage. Deploy to **one tournament server** and set `GUILD_ID` for guild-scoped
+command synchronization. War room operations reject other guilds when `GUILD_ID`
+is configured; certificate lookup is always scoped to its issuing guild. Staff
+checks support all comma-separated `ADMIN_ROLE_ID` / `MANAGER_ROLE_ID` values.
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+The suite covers graphics, migrations, certificate idempotency/revocation/guild
+scope, verified player stats, stream lifecycle, URL validation, staff permissions,
+mocked room creation/sync/close/rollback and offline extension registration.
+Discord delivery and channel permissions should additionally be smoke-tested in
+an actual test server with a configured bot token.
