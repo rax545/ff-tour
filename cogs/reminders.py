@@ -16,7 +16,6 @@ from discord import app_commands
 from config import SERVER_NAME
 from database.db import connect, audit
 from services.reminders import (
-    DEFAULT_OFFSETS,
     parse_schedule_time,
     parse_offsets,
     schedule_match_reminders,
@@ -122,6 +121,11 @@ class Reminders(commands.Cog):
                 "UPDATE matches SET scheduled_at=? WHERE id=?",
                 (f"<t:{match_unix}:F>", match_id)
             )
+
+            await db.execute("UPDATE prediction_pools SET closes_at=MIN(closes_at,?) WHERE match_id=? AND status='open'",
+                             (match_unix, match_id))
+            await db.execute("UPDATE squad_ready_checks SET expires_at=MIN(expires_at,?) WHERE match_id=? AND status='open'",
+                             (match_unix, match_id))
 
             scheduled = await schedule_match_reminders(
                 db,

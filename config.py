@@ -78,3 +78,8 @@ def _parse_tz_offset(val: str) -> int:
 
 
 TZ_OFFSET_MINUTES = _parse_tz_offset(os.getenv('TIMEZONE_UTC_OFFSET', '+06:00'))
+
+# Review-only radar thresholds; never used for automatic bans or identity claims.
+RADAR_NEW_ACCOUNT_DAYS = max(1, min(30, int(os.getenv('RADAR_NEW_ACCOUNT_DAYS', '7'))))
+RADAR_MIN_MATCHES = max(3, int(os.getenv('RADAR_MIN_MATCHES', '3')))
+RADAR_KILLS_PER_MATCH = max(1, int(os.getenv('RADAR_KILLS_PER_MATCH', '12')))

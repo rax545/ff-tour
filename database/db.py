@@ -2,6 +2,7 @@ import aiosqlite
 from pathlib import Path
 
 from config import DATABASE_PATH
+from database.arena_schema import migrate_arena
 
 
 SCHEMA = """
@@ -331,6 +332,8 @@ async def init_db():
         except Exception:
             pass
 
+        # New feature migrations fail loudly rather than silently leaving a partial schema.
+        await migrate_arena(db)
         await db.commit()
 
     finally:

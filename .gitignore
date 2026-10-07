@@ -8,3 +8,8 @@ __pycache__/
 data/*.sqlite3
 data/*.sqlite3-*
 data/*.db
+
+# Local tooling and render/test artifacts
+.cache/
+.coverage
+coverage/
