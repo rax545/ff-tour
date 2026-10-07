@@ -51,7 +51,7 @@ class EsportsBot(commands.Bot):
 
     async def setup_hook(self):
         await init_db()
-        for ext in ("cogs.esports", "cogs.admin", "cogs.support", "cogs.reminders"):
+        for ext in ("cogs.esports", "cogs.admin", "cogs.support", "cogs.reminders", "cogs.arena"):
             await self.load_extension(ext)
             logger.info("Loaded extension: %s", ext)
 

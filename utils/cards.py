@@ -50,3 +50,47 @@ def live_broadcast(tournament, match_no, map_name, platform):
                  f'WATCH LIVE ON {str(platform).upper()}',
                  'TUNE IN NOW - DO NOT MISS THE ACTION'],
                 (239, 68, 68))
+
+
+def passport(player, rosters, stats, student=None):
+    lines = [f'VERIFIED INDIVIDUAL: {stats["kills"]} KILLS | {stats["matches"]} MATCHES',
+             f'DAMAGE: {stats["damage"]} | TEAM KILLS ARE NOT INDIVIDUAL KILLS']
+    if student:
+        lines.append(f'{student["department"]} | BATCH {student["batch"]} | SECTION {student["section"]}')
+    for row in rosters[:5]:
+        lines.append(f'{row["ign"]} | UID {row["uid"]} | {row["role"]} | {row["team_name"]}')
+    return card(1200, 720, 'PLAYER PASSPORT', player, lines, (0, 220, 255))
+
+
+def certificate(record):
+    return card(1600, 1000, 'CERTIFICATE OF ACHIEVEMENT', record['tournament_name'],
+                [record['recipient_name'], record['award'], f'SQUAD: {record["team_name"]}',
+                 f'ISSUED: {record["issued_at"]} UTC', f'REGISTRY: {record["code"]}',
+                 'VERIFY WITH /certificate verify - REGISTRY STATUS IS AUTHORITATIVE'], (255, 197, 44))
+
+
+def slot_grid(tournament, teams, max_teams, page=1):
+    """Render 24 deterministic, ID-ordered lobby positions per page."""
+    if page < 1 or (page - 1) * 24 >= max_teams:
+        raise ValueError('Page has no slots.')
+    image = Image.new('RGB', (1440, 1000), (9, 14, 31))
+    draw = ImageDraw.Draw(image)
+    draw.text((40, 30), 'SQUAD SLOT GRID', font=get_font(FONT_BOLD_PATH, 44), fill=(0, 220, 255))
+    draw.text((40, 95), clean_text_for_image(tournament)[:65], font=get_font(FONT_REGULAR_PATH, 26), fill='white')
+    draw.text((40, 140), f'{len(teams)}/{max_teams} REGISTERED | PAGE {page} | ID-ORDERED LOBBY',
+              font=get_font(FONT_REGULAR_PATH, 22), fill='white')
+    for pos in range(24):
+        index = (page - 1) * 24 + pos
+        if index >= max_teams:
+            break
+        x, y = 40 + (pos % 4) * 350, 210 + (pos // 4) * 125
+        occupied = index < len(teams)
+        accent = (0, 220, 255) if occupied else (90, 108, 131)
+        draw.rounded_rectangle((x,y,x+330,y+108), radius=12, fill=(24,32,54), outline=accent, width=2)
+        draw.text((x+15,y+10), f'SLOT {index+1:02d}', font=get_font(FONT_BOLD_PATH, 22), fill=accent)
+        name = f'{teams[index]["name"]} [{teams[index]["tag"]}]' if occupied else 'OPEN'
+        draw.text((x+15,y+52), clean_text_for_image(name)[:22], font=get_font(FONT_REGULAR_PATH, 22), fill='white')
+    buf = io.BytesIO()
+    image.save(buf, format='PNG')
+    buf.seek(0)
+    return buf

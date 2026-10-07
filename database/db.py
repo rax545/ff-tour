@@ -202,6 +202,29 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 
+CREATE TABLE IF NOT EXISTS certificates (
+    code TEXT PRIMARY KEY,
+    guild_id INTEGER NOT NULL,
+    tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+    team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    recipient_id INTEGER NOT NULL,
+    recipient_name TEXT NOT NULL,
+    award TEXT NOT NULL,
+    issued_by INTEGER NOT NULL,
+    issued_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    revoked_at TEXT,
+    UNIQUE(guild_id, tournament_id, team_id, recipient_id, award)
+);
+
+CREATE TABLE IF NOT EXISTS war_rooms (
+    guild_id INTEGER NOT NULL,
+    team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    text_channel_id INTEGER DEFAULT 0,
+    voice_channel_id INTEGER DEFAULT 0,
+    created_by INTEGER NOT NULL,
+    PRIMARY KEY(guild_id, team_id)
+);
+
 CREATE TABLE IF NOT EXISTS reminders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     match_id INTEGER NOT NULL,

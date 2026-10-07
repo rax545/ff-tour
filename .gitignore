@@ -3,3 +3,8 @@ __pycache__/
 *.pyo
 .env
 .venv/
+
+# Runtime databases (including test databases)
+data/*.sqlite3
+data/*.sqlite3-*
+data/*.db
