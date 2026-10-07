@@ -5,12 +5,14 @@ import asyncio
 import discord
 from discord import app_commands
 
+from config import SERVER_NAME
 from services.arena import (
     issue_certificate,
     player_passport,
     revoke_certificate,
     verify_certificate,
 )
+from utils.banner import generate_certificate_card
 from services.squad_ops import (
     MAPS,
     close_ready_check,
@@ -98,6 +100,48 @@ class Arena(TournamentCog):
         await interaction.followup.send(
             file=discord.File(image, filename=f"{record['code']}.png"),
             content=f"Certificate `{record['code']}` • Share this image with the recipient. Verify using `/certificate verify`.",
+            ephemeral=True,
+        )
+
+    @certificate_group.command(
+        name="generate",
+        description="Generate your own Certificate of Esports Excellence card for a squad award",
+    )
+    async def generate(
+        self,
+        interaction: discord.Interaction,
+        tournament_id: int,
+        team_id: int,
+        award: app_commands.Range[str, 1, 80] = "Tournament Participant",
+    ):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            record = await issue_certificate(
+                interaction.guild.id,
+                tournament_id,
+                team_id,
+                interaction.user.id,
+                award,
+                interaction.user.id,
+            )
+        except ValueError as exc:
+            return await interaction.followup.send(embed=err(str(exc)), ephemeral=True)
+        image = await asyncio.to_thread(
+            generate_certificate_card,
+            record["recipient_name"],
+            record["award"],
+            record["tournament_name"],
+            record["team_name"],
+            record["code"],
+            record["issued_at"],
+            SERVER_NAME,
+        )
+        await interaction.followup.send(
+            file=discord.File(image, filename=f"{record['code']}.png"),
+            content=(
+                f"Certificate `{record['code']}` • {record['award']} — verify anytime with "
+                f"`/certificate verify {record['code']}`."
+            ),
             ephemeral=True,
         )
 

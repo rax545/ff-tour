@@ -1,9 +1,11 @@
 import io
 import asyncio
+from datetime import datetime, timedelta, timezone
+
 import discord
 from discord import app_commands
 
-from config import SERVER_NAME
+from config import SERVER_NAME, DEVELOPER
 from database.db import connect, audit
 from services.arena import stream_status
 from services.streams import get_stream, start_stream, stop_stream, stream_recipients
@@ -14,11 +16,33 @@ from services.player_stats import record_player_result
 from services.arena_common import match_teams
 from services.scoring import calculate
 from services.leaderboard import leaderboard, section_leaderboard, top_fraggers
-from utils.banner import generate_tournament_banner, generate_match_banner
+from services.economy import (
+    EconomyError,
+    get_balance,
+    place_prediction,
+    resolve_predictions,
+)
+from services.bracket import generate_bracket, get_bracket, BracketError
+from services.war_rooms import WarRoomService
+from utils.banner import (
+    generate_tournament_banner,
+    generate_match_banner,
+    generate_room_pass_card,
+    generate_points_table_graphic,
+    generate_booyah_card,
+    generate_mvp_card,
+    generate_live_stream_card,
+    generate_slotlist_card,
+    generate_matchup_clash_card,
+    generate_hall_of_fame_card,
+    generate_tournament_bracket_card,
+    generate_killfeed_card,
+    generate_broadcast_lowerthird_card,
+)
 from utils.embeds import base, ok, err, og_match_dm_embed, og_room_dm_embed
 from utils.permissions import require_staff
 from utils.interactions import TournamentCog
-from utils.cards import room_pass, points_table, booyah, mvp, live_broadcast, slot_grid
+from utils.cards import slot_grid
 from views.panels import TournamentPanel
 
 OFFICIAL_5_MAP_ROTATION = [
@@ -64,6 +88,7 @@ ROLE_BADGES = {
 class Esports(TournamentCog):
     def __init__(self, bot):
         self.bot = bot
+        self.rooms = WarRoomService()
 
     tournament = app_commands.Group(
         name="tournament",
@@ -296,7 +321,7 @@ class Esports(TournamentCog):
         )
 
         embed.set_footer(
-            text=f"🐺 {SERVER_NAME} • Tournament System"
+            text=f"🐺 {SERVER_NAME} • Tournament System • Developed by {DEVELOPER}"
         )
 
         if file:
@@ -366,6 +391,54 @@ class Esports(TournamentCog):
                 "UPDATE tournaments SET status='closed' WHERE id=?",
                 (tournament_id,)
             )
+
+            # 🏛️ Auto-induct the verified champion into the All-Time Hall of Fame
+            cur = await db.execute(
+                """
+                SELECT t.id, t.name, t.tag,
+                       COALESCE(SUM(res.total_points), 0) AS pts,
+                       COALESCE(SUM(res.kills), 0) AS kills,
+                       COUNT(res.id) AS verified_matches
+                FROM teams t
+                LEFT JOIN matches m ON m.tournament_id = t.tournament_id
+                LEFT JOIN results res ON res.match_id = m.id
+                    AND res.team_id = t.id AND res.verified = 1
+                WHERE t.tournament_id = ?
+                GROUP BY t.id
+                HAVING verified_matches > 0
+                ORDER BY pts DESC, kills DESC
+                LIMIT 1
+                """,
+                (tournament_id,)
+            )
+            champion = await cur.fetchone()
+            if champion:
+                cur = await db.execute(
+                    """
+                    SELECT 1 FROM hall_of_fame_entries
+                    WHERE tournament_id=? AND team_id=? AND achievement='CHAMPION'
+                    """,
+                    (tournament_id, champion["id"])
+                )
+                already = await cur.fetchone()
+                if not already:
+                    season = f"{datetime.now(timezone.utc).year} Season"
+                    await db.execute(
+                        """
+                        INSERT INTO hall_of_fame_entries
+                            (tournament_id, team_id, team_name, team_tag, achievement, points, kills, season)
+                        VALUES (?, ?, ?, ?, 'CHAMPION', ?, ?, ?)
+                        """,
+                        (
+                            tournament_id,
+                            champion["id"],
+                            champion["name"],
+                            champion["tag"],
+                            champion["pts"],
+                            champion["kills"],
+                            season,
+                        )
+                    )
 
             await db.commit()
 
@@ -467,7 +540,7 @@ class Esports(TournamentCog):
             )
 
         embed.set_footer(
-            text=f"🐺 {SERVER_NAME} • Esports Management"
+            text=f"🐺 {SERVER_NAME} • Esports Management • Developed by {DEVELOPER}"
         )
 
         await interaction.response.send_message(
@@ -858,7 +931,7 @@ class Esports(TournamentCog):
         if logo_url:
             embed.set_thumbnail(url=logo_url)
 
-        embed.set_footer(text=f"🐺 {SERVER_NAME} • Free Fire Esports")
+        embed.set_footer(text=f"🐺 {SERVER_NAME} • Free Fire Esports • Developed by {DEVELOPER}")
 
         await interaction.followup.send(embed=embed)
 
@@ -967,7 +1040,7 @@ class Esports(TournamentCog):
             embed.set_thumbnail(url=team["logo_url"])
 
         embed.set_footer(
-            text=f"🐺 {SERVER_NAME} • Squad Roster Management"
+            text=f"🐺 {SERVER_NAME} • Squad Roster Management • Developed by {DEVELOPER}"
         )
 
         await interaction.response.send_message(embed=embed)
@@ -1340,7 +1413,7 @@ class Esports(TournamentCog):
                             ),
                             embed=dm_embed,
                             files=[discord.File(__import__('io').BytesIO(banner_bytes), filename="match_banner.png"),
-                                   discord.File(room_pass(team_info['name'], tournament['name'], match_no, map_name), filename="vip_pass.png")]
+                                   discord.File(generate_room_pass_card(team_info['name'], tournament['name'], match_no, map_name, 1, SERVER_NAME), filename="vip_pass.png")]
                         )
                         dms_sent += 1
                     except discord.Forbidden:
@@ -1386,7 +1459,7 @@ class Esports(TournamentCog):
             ),
             inline=False
         )
-        embed.set_footer(text=f"🐺 {SERVER_NAME} • Esports Management")
+        embed.set_footer(text=f"🐺 {SERVER_NAME} • Esports Management • Developed by {DEVELOPER}")
 
         await interaction.followup.send(
             embed=embed,
@@ -1525,8 +1598,8 @@ class Esports(TournamentCog):
                 )
 
                 try:
-                    access_pass = await asyncio.to_thread(room_pass, tm['name'], match['tournament_name'],
-                                                        match['match_no'], match['map'] or 'TBA')
+                    access_pass = await asyncio.to_thread(generate_room_pass_card, tm['name'], match['tournament_name'],
+                                                        match['match_no'], match['map'] or 'TBA', 1, SERVER_NAME)
                     await member.send(
                         content=(
                             f"🚨 **[ {SERVER_NAME} • ROOM PASS ]** 🚨\n"
@@ -1606,7 +1679,7 @@ class Esports(TournamentCog):
         if not changed:
             return await interaction.followup.send(embed=ok("This link is already LIVE. No duplicate announcements or DMs sent. Use /match streamstatus, or rebroadcast:true to explicitly resend."), ephemeral=True)
         await update_stopped_announcement(interaction.guild, before)
-        image = await asyncio.to_thread(live_broadcast, row['tournament_name'], row['match_no'], row['map'] or 'TBA', row['stream_platform'])
+        image = await asyncio.to_thread(generate_live_stream_card, row['tournament_name'], row['match_no'], row['map'] or 'TBA', row['stream_platform'], SERVER_NAME)
         image_bytes = image.getvalue()
         # Publish first so a slow/blocked DM never holds up the public live link.
         message, current = await post_announcement(interaction, row, image_bytes)
@@ -1902,7 +1975,7 @@ class Esports(TournamentCog):
                 )
 
         embed.set_footer(
-            text=f"🐺 {SERVER_NAME} • Verified Leaderboard"
+            text=f"🐺 {SERVER_NAME} • Verified Leaderboard • Developed by {DEVELOPER}"
         )
 
         await interaction.response.send_message(
@@ -2036,7 +2109,7 @@ class Esports(TournamentCog):
             inline=False
         )
 
-        embed.set_footer(text="🐺 Root LU • Leading University Tournament Center")
+        embed.set_footer(text="🐺 Root LU • Leading University Tournament Center • Developed by Joy")
         await interaction.response.send_message(embed=embed)
 
     @result.command(
@@ -2119,7 +2192,7 @@ class Esports(TournamentCog):
                 inline=False
             )
 
-        embed.set_footer(text="🐺 Root LU • Free Fire Esports Statistics")
+        embed.set_footer(text="🐺 Root LU • Free Fire Esports Statistics • Developed by Joy")
         await interaction.followup.send(embed=embed)
 
     @section.command(
@@ -2185,7 +2258,7 @@ class Esports(TournamentCog):
                 )
                 embed.add_field(name=title_line, value=value_line, inline=False)
 
-        embed.set_footer(text="🐺 Root LU • Leading University CSE Free Fire League")
+        embed.set_footer(text="🐺 Root LU • Leading University CSE Free Fire League • Developed by Joy")
         await interaction.followup.send(embed=embed)
 
     @student.command(
@@ -2326,7 +2399,7 @@ class Esports(TournamentCog):
         embed.add_field(name="📚 Batch & Section", value=f"**Batch {batch} (Sec {section})**", inline=True)
         embed.add_field(name="🛡️ Status", value="🟢 **VERIFIED STUDENT**", inline=True)
         embed.add_field(name="🐺 Community", value="**Root LU • Leading University**", inline=True)
-        embed.set_footer(text="🐺 Root LU • Official Student Verification System")
+        embed.set_footer(text="🐺 Root LU • Official Student Verification System • Developed by Joy")
 
         await interaction.response.send_message(embed=embed)
 
@@ -2393,7 +2466,7 @@ class Esports(TournamentCog):
             embed.add_field(name="🎮 Esports Teams", value="\n".join(team_lines), inline=False)
 
         embed.set_thumbnail(url=target.display_avatar.url)
-        embed.set_footer(text="🐺 Root LU • Leading University")
+        embed.set_footer(text="🐺 Root LU • Leading University • Developed by Joy")
         await interaction.response.send_message(embed=embed)
 
 
@@ -2456,7 +2529,11 @@ class Esports(TournamentCog):
             return await interaction.followup.send(embed=err("No teams registered."), ephemeral=True)
         if (page - 1) * 12 >= len(rows):
             return await interaction.followup.send(embed=err("Page has no teams."), ephemeral=True)
-        await interaction.followup.send(file=discord.File(points_table(tournament['name'], rows[(page-1)*12:page*12], page), filename="points_table.png"))
+        page_rows = [dict(r) for r in rows[(page - 1) * 12:page * 12]]
+        table_img = await asyncio.to_thread(
+            generate_points_table_graphic, tournament['name'], page_rows, SERVER_NAME
+        )
+        await interaction.followup.send(file=discord.File(table_img, filename="points_table.png"))
 
     @result.command(name="booyah", description="Generate a golden winner card from verified standings")
     async def winner_card(self, interaction: discord.Interaction, tournament_id: int):
@@ -2476,7 +2553,10 @@ class Esports(TournamentCog):
         if not ranked:
             return await interaction.followup.send(embed=err("No verified results yet."), ephemeral=True)
         top = ranked[0]
-        await interaction.followup.send(file=discord.File(booyah(top['name'], tournament['name'], top['pts']), filename="booyah.png"))
+        booyah_img = await asyncio.to_thread(
+            generate_booyah_card, top['name'], tournament['name'], top['pts'], top['kills'], SERVER_NAME
+        )
+        await interaction.followup.send(file=discord.File(booyah_img, filename="booyah.png"))
 
     @result.command(name="mvp", description="Generate a cyberpunk MVP card from verified kills")
     async def mvp_card(self, interaction: discord.Interaction, tournament_id: int):
@@ -2487,7 +2567,8 @@ class Esports(TournamentCog):
         if not players:
             return await interaction.followup.send(embed=err("No verified individual results yet. Staff can record them with /result player."), ephemeral=True)
         player = players[0]
-        image = await asyncio.to_thread(mvp, player['ign'], player['team_name'], player['kills'])
+        image = await asyncio.to_thread(generate_mvp_card, player['ign'], player['team_name'], player['kills'],
+                                        player.get('damage', 0) or 0, 1, SERVER_NAME)
         await interaction.followup.send(file=discord.File(image, filename="mvp.png"),
                                         content="MVP from verified individual results only; squad totals are not player kills.")
 
@@ -2506,6 +2587,1270 @@ class Esports(TournamentCog):
 # =============================================================
 # SETUP
 # =============================================================
+
+    # =========================================================
+    # GOD-TIER: TOURNAMENT LEADERBOARD (12-team points table graphic)
+    # =========================================================
+
+    @tournament.command(
+        name="leaderboard",
+        description="Show the verified points table with a 12-team leaderboard graphic"
+    )
+    @app_commands.describe(tournament_id="Tournament ID")
+    async def tournament_leaderboard(
+        self,
+        interaction: discord.Interaction,
+        tournament_id: int
+    ):
+        if tournament_id < 1:
+            return await interaction.response.send_message(
+                embed=err("Invalid tournament ID."),
+                ephemeral=True
+            )
+
+        await interaction.response.defer()
+
+        db = await connect()
+        try:
+            cur = await db.execute(
+                "SELECT name FROM tournaments WHERE id=?",
+                (tournament_id,)
+            )
+            tournament = await cur.fetchone()
+        finally:
+            await db.close()
+
+        if not tournament:
+            return await interaction.followup.send(
+                embed=err("Tournament not found."),
+                ephemeral=True
+            )
+
+        rows = [dict(r) for r in await leaderboard(tournament_id)]
+        if not rows:
+            return await interaction.followup.send(
+                embed=err("No teams registered for this tournament yet."),
+                ephemeral=True
+            )
+
+        embed = base(
+            f"🏆 {SERVER_NAME} • LIVE POINTS TABLE",
+            f"Official verified standings for **{tournament['name']}**."
+        )
+        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+        for index, row in enumerate(rows[:12], 1):
+            medal = medals.get(index, f"`#{index:02d}`")
+            embed.add_field(
+                name=f"{medal} {row['name']} [{row['tag']}]",
+                value=(
+                    f"💎 **{row['pts']} PTS** • "
+                    f"🔫 **{row['kills']} Kills** • "
+                    f"🎮 **{row['matches']} Matches**"
+                ),
+                inline=False
+            )
+        embed.set_footer(
+            text=f"🐺 {SERVER_NAME} • Verified Leaderboard • Developed by {DEVELOPER}"
+        )
+
+        table_img = await asyncio.to_thread(
+            generate_points_table_graphic,
+            tournament["name"],
+            rows[:12],
+            SERVER_NAME
+        )
+        await interaction.followup.send(
+            embed=embed,
+            file=discord.File(table_img, filename="points_table.png")
+        )
+
+    # =========================================================
+    # GOD-TIER: TOURNAMENT SLOTLIST (12-slot lobby dropmap graphic)
+    # =========================================================
+
+    @tournament.command(
+        name="slotlist",
+        description="Show the 12-slot lobby dropmap & grid graphic"
+    )
+    @app_commands.describe(tournament_id="Tournament ID")
+    async def tournament_slotlist(
+        self,
+        interaction: discord.Interaction,
+        tournament_id: int
+    ):
+        if tournament_id < 1:
+            return await interaction.response.send_message(
+                embed=err("Invalid tournament ID."),
+                ephemeral=True
+            )
+
+        await interaction.response.defer()
+
+        db = await connect()
+        try:
+            cur = await db.execute(
+                "SELECT name, max_teams FROM tournaments WHERE id=?",
+                (tournament_id,)
+            )
+            tournament = await cur.fetchone()
+            if not tournament:
+                return await interaction.followup.send(
+                    embed=err("Tournament not found."),
+                    ephemeral=True
+                )
+            cur = await db.execute(
+                """
+                SELECT DISTINCT id, name, tag, batch, section
+                FROM teams WHERE tournament_id=?
+                UNION
+                SELECT DISTINCT t.id, t.name, t.tag, t.batch, t.section
+                FROM teams t
+                JOIN registrations r ON r.team_id = t.id
+                WHERE r.tournament_id=?
+                ORDER BY id
+                """,
+                (tournament_id, tournament_id)
+            )
+            teams = [dict(t) for t in await cur.fetchall()]
+        finally:
+            await db.close()
+
+        embed = base(
+            f"🪂 {tournament['name']} • LOBBY DROPMAP",
+            f"**{len(teams)}/{tournament['max_teams']}** squads confirmed. Drop zones locked — be in lobby 15 minutes early."
+        )
+        embed.set_footer(
+            text=f"🐺 {SERVER_NAME} • Lobby Management • Developed by {DEVELOPER}"
+        )
+
+        dropmap_img = await asyncio.to_thread(
+            generate_slotlist_card,
+            tournament["name"],
+            teams,
+            tournament["max_teams"],
+            SERVER_NAME
+        )
+        await interaction.followup.send(
+            embed=embed,
+            file=discord.File(dropmap_img, filename="lobby_dropmap.png")
+        )
+
+    # =========================================================
+    # GOD-TIER: TOURNAMENT BRACKET (knockout tree graphic)
+    # =========================================================
+
+    @tournament.command(
+        name="bracket",
+        description="Show the single-elimination knockout bracket tree"
+    )
+    @app_commands.describe(
+        tournament_id="Tournament ID",
+        regenerate="Staff only: force-regenerate the bracket from current standings"
+    )
+    async def tournament_bracket(
+        self,
+        interaction: discord.Interaction,
+        tournament_id: int,
+        regenerate: bool = False
+    ):
+        if tournament_id < 1:
+            return await interaction.response.send_message(
+                embed=err("Invalid tournament ID."),
+                ephemeral=True
+            )
+
+        await interaction.response.defer()
+
+        db = await connect()
+        try:
+            cur = await db.execute(
+                "SELECT name FROM tournaments WHERE id=?",
+                (tournament_id,)
+            )
+            tournament = await cur.fetchone()
+        finally:
+            await db.close()
+
+        if not tournament:
+            return await interaction.followup.send(
+                embed=err("Tournament not found."),
+                ephemeral=True
+            )
+
+        bracket = await get_bracket(tournament_id)
+        if not bracket["rounds"]:
+            if not await require_staff(interaction):
+                return
+            await interaction.followup.send(
+                embed=err("No bracket generated yet — staff can generate one with `/tournament bracket`."),
+                ephemeral=True
+            )
+            return
+        if regenerate:
+            if not await require_staff(interaction):
+                return
+            try:
+                bracket = await generate_bracket(tournament_id, force=True)
+            except BracketError as exc:
+                return await interaction.followup.send(
+                    embed=err(str(exc)),
+                    ephemeral=True
+                )
+            await audit(interaction.user.id, "bracket_regenerate", str(tournament_id))
+
+        rounds = bracket["rounds"]
+        total_matches = sum(len(r) for r in rounds)
+        embed = base(
+            f"🧩 {tournament['name']} • KNOCKOUT BRACKET",
+            f"Single-elimination tree — **{bracket['total_rounds']}** rounds, **{total_matches}** matches."
+        )
+        embed.set_footer(
+            text=f"🐺 {SERVER_NAME} • Bracket Stage • Developed by {DEVELOPER}"
+        )
+
+        bracket_img = await asyncio.to_thread(
+            generate_tournament_bracket_card,
+            tournament["name"],
+            rounds,
+            SERVER_NAME
+        )
+        await interaction.followup.send(
+            embed=embed,
+            file=discord.File(bracket_img, filename="tournament_bracket.png")
+        )
+
+    # =========================================================
+    # GOD-TIER: TOURNAMENT HALL OF FAME (trophy cabinet graphic)
+    # =========================================================
+
+    @tournament.command(
+        name="halloffame",
+        description="Show the All-Time Hall of Fame & trophy cabinet"
+    )
+    @app_commands.describe(
+        tournament_id="Optional tournament ID to filter by"
+    )
+    async def tournament_halloffame(
+        self,
+        interaction: discord.Interaction,
+        tournament_id: int = 0
+    ):
+        await interaction.response.defer()
+
+        db = await connect()
+        try:
+            if tournament_id > 0:
+                cur = await db.execute(
+                    """
+                    SELECT h.*, t.name AS tournament_name
+                    FROM hall_of_fame_entries h
+                    JOIN tournaments t ON t.id = h.tournament_id
+                    WHERE h.tournament_id=?
+                    ORDER BY h.id DESC
+                    """,
+                    (tournament_id,)
+                )
+            else:
+                cur = await db.execute(
+                    """
+                    SELECT h.*, t.name AS tournament_name
+                    FROM hall_of_fame_entries h
+                    JOIN tournaments t ON t.id = h.tournament_id
+                    ORDER BY h.id DESC
+                    """
+                )
+            entries = [dict(e) for e in await cur.fetchall()]
+        finally:
+            await db.close()
+
+        embed = base(
+            "🏛️ ROOT LU • ALL-TIME HALL OF FAME",
+            "The greatest squads in Leading University CSE esports history."
+        )
+        if not entries:
+            embed.description += "\n\n⚠️ *No legends inducted yet — close a tournament with verified results to crown the first champion!*"
+        else:
+            for e in entries[:10]:
+                embed.add_field(
+                    name=f"🏆 {e['team_name']} [{e['team_tag']}] — {e['achievement']}",
+                    value=(
+                        f"💎 **{e['points']} PTS** • 🔫 **{e['kills']} Kills**\n"
+                        f"📅 {e['season']} • {e['tournament_name']}"
+                    ),
+                    inline=False
+                )
+        embed.set_footer(
+            text=f"🐺 {SERVER_NAME} • Hall of Fame • Developed by {DEVELOPER}"
+        )
+
+        hof_img = await asyncio.to_thread(
+            generate_hall_of_fame_card,
+            entries[:8],
+            SERVER_NAME
+        )
+        await interaction.followup.send(
+            embed=embed,
+            file=discord.File(hof_img, filename="hall_of_fame.png")
+        )
+
+    # =========================================================
+    # GOD-TIER: TEAM ALIASES (register / info) + MYTEAM
+    # =========================================================
+
+    # /team register — canonical registration command (4 starters + 1 substitute)
+    team.command(
+        name="register",
+        description="Register a full 4-player squad + optional 5th substitute (4+1) with roles, batch & section"
+    )(team_create.callback)
+
+    # /team info — canonical squad info command
+    team.command(
+        name="info",
+        description="Show a squad's full 4+1 lineup, UIDs, roles and batch/section"
+    )(roster.callback)
+
+    @team.command(
+        name="myteam",
+        description="Show every squad you captain or play for"
+    )
+    async def myteam(self, interaction: discord.Interaction):
+        db = await connect()
+        try:
+            cur = await db.execute(
+                """
+                SELECT t.id, t.name, t.tag, t.batch, t.section,
+                       t.captain_id, tour.name AS tournament_name
+                FROM teams t
+                JOIN tournaments tour ON tour.id = t.tournament_id
+                WHERE t.captain_id = ?
+                UNION
+                SELECT t.id, t.name, t.tag, t.batch, t.section,
+                       t.captain_id, tour.name AS tournament_name
+                FROM team_members tm
+                JOIN teams t ON t.id = tm.team_id
+                JOIN tournaments tour ON tour.id = t.tournament_id
+                WHERE tm.user_id = ?
+                ORDER BY id DESC
+                """,
+                (interaction.user.id, interaction.user.id)
+            )
+            teams = await cur.fetchall()
+        finally:
+            await db.close()
+
+        if not teams:
+            return await interaction.response.send_message(
+                embed=err(
+                    "You are not part of any squad yet.\n"
+                    "Register with `/team register` or ask your captain to add you via `/team addplayer`."
+                ),
+                ephemeral=True
+            )
+
+        embed = base(
+            f"🛡️ {interaction.user.display_name} • MY SQUADS",
+            f"You are part of **{len(teams)}** squad(s) in **{SERVER_NAME}**."
+        )
+        for tm in teams[:10]:
+            role_line = "👑 Captain" if tm["captain_id"] == interaction.user.id else "🎮 Player"
+            batch_val = f"Batch {tm['batch']} • Sec {tm['section']}" if tm["batch"] or tm["section"] else "General"
+            embed.add_field(
+                name=f"{tm['name']} [{tm['tag']}] (#{tm['id']})",
+                value=(
+                    f"{role_line} • 🏆 {tm['tournament_name']}\n"
+                    f"🏛️ `{batch_val}`"
+                ),
+                inline=False
+            )
+        embed.set_footer(
+            text=f"🐺 {SERVER_NAME} • Squad Membership • Developed by {DEVELOPER}"
+        )
+        await interaction.response.send_message(embed=embed)
+
+    # =========================================================
+    # GOD-TIER: MATCH ALIASES + FULL MATCH LIFECYCLE
+    # =========================================================
+
+    # /match credentials — canonical credential release command
+    match.command(
+        name="credentials",
+        description="Release room credentials and DM captains with the VIP access pass"
+    )(room.callback)
+
+    @match.command(
+        name="start",
+        description="Staff: mark a match as LIVE and broadcast the lower-third"
+    )
+    @app_commands.describe(match_id="Match ID")
+    async def match_start(
+        self,
+        interaction: discord.Interaction,
+        match_id: int
+    ):
+        if not await require_staff(interaction):
+            return
+
+        await interaction.response.defer()
+
+        db = await connect()
+        try:
+            cur = await db.execute(
+                """
+                SELECT m.match_no, m.map, m.scheduled_at, t.name AS tournament_name
+                FROM matches m
+                JOIN tournaments t ON t.id = m.tournament_id
+                WHERE m.id=?
+                """,
+                (match_id,)
+            )
+            match = await cur.fetchone()
+            if not match:
+                return await interaction.followup.send(
+                    embed=err("Match not found."),
+                    ephemeral=True
+                )
+            await db.execute(
+                "UPDATE matches SET status='live' WHERE id=?",
+                (match_id,)
+            )
+            await db.commit()
+        finally:
+            await db.close()
+
+        await audit(interaction.user.id, "match_start", str(match_id))
+
+        lower_third = await asyncio.to_thread(
+            generate_broadcast_lowerthird_card,
+            f"MATCH #{match['match_no']} IS LIVE - {match['map'] or 'TBA'}",
+            match["tournament_name"],
+            SERVER_NAME
+        )
+
+        embed = base(
+            f"🔴 MATCH #{match['match_no']} IS LIVE!",
+            (
+                f"**{match['tournament_name']}** — {match['map'] or 'TBA'} map.\n"
+                f"Drop in now, squads!"
+            ),
+            color=discord.Color.from_rgb(239, 68, 68)
+        )
+        embed.set_footer(
+            text=f"🐺 {SERVER_NAME} • Live Match • Developed by {DEVELOPER}"
+        )
+        await interaction.followup.send(
+            embed=embed,
+            file=discord.File(lower_third, filename="lower_third.png")
+        )
+
+    @match.command(
+        name="end",
+        description="Staff: complete a match — crown the winner (Booyah card) & resolve coin predictions"
+    )
+    @app_commands.describe(
+        match_id="Match ID",
+        winner_team_id="Winning squad's Team ID (posts the Booyah card & pays predictions)"
+    )
+    async def match_end(
+        self,
+        interaction: discord.Interaction,
+        match_id: int,
+        winner_team_id: int
+    ):
+        if not await require_staff(interaction):
+            return
+
+        await interaction.response.defer()
+
+        db = await connect()
+        try:
+            cur = await db.execute(
+                """
+                SELECT m.id, m.match_no, m.map, m.tournament_id, t.name AS tournament_name
+                FROM matches m
+                JOIN tournaments t ON t.id = m.tournament_id
+                WHERE m.id=?
+                """,
+                (match_id,)
+            )
+            match = await cur.fetchone()
+            if not match:
+                return await interaction.followup.send(
+                    embed=err("Match not found."),
+                    ephemeral=True
+                )
+
+            cur = await db.execute(
+                "SELECT id, name, tag FROM teams WHERE id=? AND tournament_id=?",
+                (winner_team_id, match["tournament_id"])
+            )
+            winner = await cur.fetchone()
+            if not winner:
+                return await interaction.followup.send(
+                    embed=err("Winner team not found in this match's tournament."),
+                    ephemeral=True
+                )
+
+            await db.execute(
+                "UPDATE matches SET status='completed' WHERE id=?",
+                (match_id,)
+            )
+
+            # Verified standings snapshot for the winner
+            cur = await db.execute(
+                """
+                SELECT COALESCE(SUM(res.total_points), 0) AS pts,
+                       COALESCE(SUM(res.kills), 0) AS kills
+                FROM results res
+                WHERE res.team_id=? AND res.verified=1
+                """,
+                (winner_team_id,)
+            )
+            stats = await cur.fetchone()
+            await db.commit()
+        finally:
+            await db.close()
+
+        # Resolve coin predictions for this match
+        summary = await resolve_predictions(match_id, winner_team_id)
+
+        await audit(
+            interaction.user.id,
+            "match_end",
+            f"{match_id}:winner={winner_team_id}"
+        )
+
+        booyah_img = await asyncio.to_thread(
+            generate_booyah_card,
+            winner["name"],
+            match["tournament_name"],
+            stats["pts"],
+            stats["kills"],
+            SERVER_NAME
+        )
+
+        embed = base(
+            f"🏁 MATCH #{match['match_no']} COMPLETED — BOOYAH!",
+            (
+                f"🥇 Winner: **{winner['name']}** `[{winner['tag']}]`\n"
+                f"🏆 {match['tournament_name']} • 🗺️ {match['map'] or 'TBA'}\n\n"
+                f"💰 Predictions resolved: **{summary['won']}** winner(s) paid "
+                f"**{summary['payout_total']}** coins • **{summary['lost']}** stake(s) lost."
+            ),
+            color=discord.Color.from_rgb(245, 158, 11)
+        )
+        embed.set_footer(
+            text=f"🐺 {SERVER_NAME} • Match Results • Developed by {DEVELOPER}"
+        )
+        await interaction.followup.send(
+            embed=embed,
+            file=discord.File(booyah_img, filename="booyah.png")
+        )
+
+    @match.command(
+        name="dropmap",
+        description="Post the 12-slot lobby dropmap & grid for this match's tournament"
+    )
+    @app_commands.describe(match_id="Match ID")
+    async def match_dropmap(
+        self,
+        interaction: discord.Interaction,
+        match_id: int
+    ):
+        await interaction.response.defer()
+
+        db = await connect()
+        try:
+            cur = await db.execute(
+                """
+                SELECT m.match_no, m.tournament_id, t.name AS tournament_name, t.max_teams
+                FROM matches m
+                JOIN tournaments t ON t.id = m.tournament_id
+                WHERE m.id=?
+                """,
+                (match_id,)
+            )
+            match = await cur.fetchone()
+            if not match:
+                return await interaction.followup.send(
+                    embed=err("Match not found."),
+                    ephemeral=True
+                )
+            cur = await db.execute(
+                """
+                SELECT DISTINCT id, name, tag, batch, section
+                FROM teams WHERE tournament_id=?
+                UNION
+                SELECT DISTINCT t.id, t.name, t.tag, t.batch, t.section
+                FROM teams t
+                JOIN registrations r ON r.team_id = t.id
+                WHERE r.tournament_id=?
+                ORDER BY id
+                """,
+                (match["tournament_id"], match["tournament_id"])
+            )
+            teams = [dict(t) for t in await cur.fetchall()]
+        finally:
+            await db.close()
+
+        embed = base(
+            f"🪂 MATCH #{match['match_no']} • LOBBY DROPMAP",
+            f"**{len(teams)}/{match['max_teams']}** squads confirmed for **{match['tournament_name']}**."
+        )
+        embed.set_footer(
+            text=f"🐺 {SERVER_NAME} • Lobby Management • Developed by {DEVELOPER}"
+        )
+        dropmap_img = await asyncio.to_thread(
+            generate_slotlist_card,
+            match["tournament_name"],
+            teams,
+            match["max_teams"],
+            SERVER_NAME
+        )
+        await interaction.followup.send(
+            embed=embed,
+            file=discord.File(dropmap_img, filename="lobby_dropmap.png")
+        )
+
+    @match.command(
+        name="warrooms",
+        description="Staff: create/synchronize private war rooms for every squad in this match"
+    )
+    @app_commands.describe(match_id="Match ID")
+    async def match_warrooms(
+        self,
+        interaction: discord.Interaction,
+        match_id: int
+    ):
+        if not await require_staff(interaction):
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        db = await connect()
+        try:
+            cur = await db.execute(
+                "SELECT tournament_id FROM matches WHERE id=?",
+                (match_id,)
+            )
+            match = await cur.fetchone()
+            if not match:
+                return await interaction.followup.send(
+                    embed=err("Match not found."),
+                    ephemeral=True
+                )
+            cur = await db.execute(
+                """
+                SELECT DISTINCT t.id, t.name
+                FROM teams t
+                WHERE t.tournament_id=?
+                UNION
+                SELECT DISTINCT t.id, t.name
+                FROM teams t
+                JOIN registrations r ON r.team_id = t.id
+                WHERE r.tournament_id=?
+                ORDER BY t.id
+                """,
+                (match["tournament_id"], match["tournament_id"])
+            )
+            teams = await cur.fetchall()
+        finally:
+            await db.close()
+
+        synced = 0
+        failed = 0
+        for tm in teams:
+            try:
+                await self.rooms.manage(interaction.guild, interaction.user, tm["id"])
+                synced += 1
+            except Exception:
+                failed += 1
+
+        await audit(interaction.user.id, "warrooms_sync", f"match={match_id}:{synced}")
+        await interaction.followup.send(
+            embed=ok(
+                f"War rooms synchronized for **{synced}** squad(s)"
+                + (f" — **{failed}** failed (check bot channel permissions)." if failed else "")
+            ),
+            ephemeral=True
+        )
+
+    @match.command(
+        name="cleanup_warrooms",
+        description="Staff: delete all war rooms for this match's tournament squads"
+    )
+    @app_commands.describe(match_id="Match ID")
+    async def match_cleanup_warrooms(
+        self,
+        interaction: discord.Interaction,
+        match_id: int
+    ):
+        if not await require_staff(interaction):
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        db = await connect()
+        try:
+            cur = await db.execute(
+                "SELECT tournament_id FROM matches WHERE id=?",
+                (match_id,)
+            )
+            match = await cur.fetchone()
+            if not match:
+                return await interaction.followup.send(
+                    embed=err("Match not found."),
+                    ephemeral=True
+                )
+            cur = await db.execute(
+                """
+                SELECT DISTINCT t.id
+                FROM teams t
+                WHERE t.tournament_id=?
+                UNION
+                SELECT DISTINCT t.id
+                FROM teams t
+                JOIN registrations r ON r.team_id = t.id
+                WHERE r.tournament_id=?
+                ORDER BY t.id
+                """,
+                (match["tournament_id"], match["tournament_id"])
+            )
+            teams = await cur.fetchall()
+        finally:
+            await db.close()
+
+        closed = 0
+        failed = 0
+        for tm in teams:
+            try:
+                await self.rooms.manage(interaction.guild, interaction.user, tm["id"], close=True)
+                closed += 1
+            except Exception:
+                failed += 1
+
+        await audit(interaction.user.id, "warrooms_cleanup", f"match={match_id}:{closed}")
+        await interaction.followup.send(
+            embed=ok(
+                f"War rooms cleaned up for **{closed}** squad(s)"
+                + (f" — **{failed}** had no room or failed." if failed else "")
+            ),
+            ephemeral=True
+        )
+
+    @match.command(
+        name="clash",
+        description="Generate a head-to-head VERSUS squad clash poster"
+    )
+    @app_commands.describe(
+        match_id="Match ID",
+        team_a_id="First squad's Team ID",
+        team_b_id="Second squad's Team ID"
+    )
+    async def match_clash(
+        self,
+        interaction: discord.Interaction,
+        match_id: int,
+        team_a_id: int,
+        team_b_id: int
+    ):
+        await interaction.response.defer()
+
+        db = await connect()
+        try:
+            cur = await db.execute(
+                """
+                SELECT m.match_no, m.tournament_id, t.name AS tournament_name
+                FROM matches m
+                JOIN tournaments t ON t.id = m.tournament_id
+                WHERE m.id=?
+                """,
+                (match_id,)
+            )
+            match = await cur.fetchone()
+            if not match:
+                return await interaction.followup.send(
+                    embed=err("Match not found."),
+                    ephemeral=True
+                )
+
+            rows = [dict(r) for r in await leaderboard(match["tournament_id"])]
+            by_id = {r["id"]: r for r in rows}
+
+            teams = {}
+            for tid in (team_a_id, team_b_id):
+                cur = await db.execute(
+                    "SELECT id, name, tag FROM teams WHERE id=? AND tournament_id=?",
+                    (tid, match["tournament_id"])
+                )
+                row = await cur.fetchone()
+                if not row:
+                    return await interaction.followup.send(
+                        embed=err(f"Team #{tid} not found in this match's tournament."),
+                        ephemeral=True
+                    )
+                stats = by_id.get(row["id"], {})
+                teams[tid] = {
+                    "name": row["name"],
+                    "tag": row["tag"],
+                    "pts": stats.get("pts", 0),
+                    "kills": stats.get("kills", 0),
+                    "matches": stats.get("matches", 0),
+                }
+        finally:
+            await db.close()
+
+        clash_img = await asyncio.to_thread(
+            generate_matchup_clash_card,
+            teams[team_a_id],
+            teams[team_b_id],
+            match["tournament_name"],
+            match["match_no"],
+            SERVER_NAME
+        )
+
+        embed = base(
+            f"⚔️ {match['tournament_name']} • MATCH #{match['match_no']} SQUAD CLASH",
+            (
+                f"**{teams[team_a_id]['name']}** `[{teams[team_a_id]['tag']}]` "
+                f"**VS** "
+                f"**{teams[team_b_id]['name']}** `[{teams[team_b_id]['tag']}]`\n"
+                f"Head to head — one squad leaves the arena."
+            ),
+            color=discord.Color.from_rgb(168, 85, 247)
+        )
+        embed.set_footer(
+            text=f"🐺 {SERVER_NAME} • Clash Poster • Developed by {DEVELOPER}"
+        )
+        await interaction.followup.send(
+            embed=embed,
+            file=discord.File(clash_img, filename="squad_clash.png")
+        )
+
+    @match.command(
+        name="predict",
+        description="Stake coins on a squad for this match — 2x payout if they win"
+    )
+    @app_commands.describe(
+        match_id="Match ID",
+        team_id="Squad you predict to win",
+        amount="Coins to stake (minimum 10)"
+    )
+    async def match_predict(
+        self,
+        interaction: discord.Interaction,
+        match_id: int,
+        team_id: int,
+        amount: int
+    ):
+        if amount < 1:
+            return await interaction.response.send_message(
+                embed=err("Stake amount must be positive."),
+                ephemeral=True
+            )
+
+        try:
+            await place_prediction(match_id, interaction.user.id, team_id, amount)
+        except EconomyError as exc:
+            return await interaction.response.send_message(
+                embed=err(str(exc)),
+                ephemeral=True
+            )
+
+        db = await connect()
+        try:
+            cur = await db.execute(
+                "SELECT match_no, map FROM matches WHERE id=?",
+                (match_id,)
+            )
+            match = await cur.fetchone()
+            cur = await db.execute(
+                "SELECT name, tag FROM teams WHERE id=?",
+                (team_id,)
+            )
+            team = await cur.fetchone()
+        finally:
+            await db.close()
+
+        balance = await get_balance(interaction.user.id)
+        await interaction.response.send_message(
+            embed=ok(
+                f"🎯 Prediction locked in!\n\n"
+                f"🏁 Match: **#{match['match_no']}** ({match['map'] or 'TBA'})\n"
+                f"🛡️ Squad: **{team['name']}** `[{team['tag']}]`\n"
+                f"💰 Stake: **{amount}** coins\n"
+                f"💎 Balance: **{balance}** coins\n\n"
+                f"🏆 Win pays **{amount * 2}** coins. Predictions close when the match ends."
+            )
+        )
+
+    @match.command(
+        name="killfeed",
+        description="Post the live combat kill feed graphic for a match"
+    )
+    @app_commands.describe(match_id="Match ID")
+    async def match_killfeed(
+        self,
+        interaction: discord.Interaction,
+        match_id: int
+    ):
+        await interaction.response.defer()
+
+        db = await connect()
+        try:
+            cur = await db.execute(
+                """
+                SELECT m.match_no, m.map, t.name AS tournament_name
+                FROM matches m
+                JOIN tournaments t ON t.id = m.tournament_id
+                WHERE m.id=?
+                """,
+                (match_id,)
+            )
+            match = await cur.fetchone()
+            if not match:
+                return await interaction.followup.send(
+                    embed=err("Match not found."),
+                    ephemeral=True
+                )
+
+            # Verified individual frags first
+            cur = await db.execute(
+                """
+                SELECT ign, kills, damage
+                FROM player_results
+                WHERE match_id=? AND verified=1
+                ORDER BY kills DESC, damage DESC, ign ASC
+                """,
+                (match_id,)
+            )
+            frags = await cur.fetchall()
+
+            if frags:
+                events = [
+                    {
+                        "player": f["ign"],
+                        "action": "ELIMINATION",
+                        "detail": f"{f['kills']} KILLS • {f['damage']:,} DMG"
+                    }
+                    for f in frags
+                ]
+            else:
+                # Fall back to verified squad results as feed entries
+                cur = await db.execute(
+                    """
+                    SELECT t.name AS team_name, r.kills, r.placement
+                    FROM results r
+                    JOIN teams t ON t.id = r.team_id
+                    WHERE r.match_id=? AND r.verified=1
+                    ORDER BY r.placement ASC, r.kills DESC
+                    """,
+                    (match_id,)
+                )
+                events = [
+                    {
+                        "player": r["team_name"],
+                        "action": "SQUAD PLACEMENT",
+                        "detail": f"#{r['placement']} • {r['kills']} KILLS"
+                    }
+                    for r in await cur.fetchall()
+                ]
+        finally:
+            await db.close()
+
+        feed_img = await asyncio.to_thread(
+            generate_killfeed_card,
+            events,
+            SERVER_NAME,
+            f"Match #{match['match_no']} - {match['map'] or 'TBA'}"
+        )
+
+        embed = base(
+            f"🔴 LIVE KILL FEED — MATCH #{match['match_no']}",
+            f"**{match['tournament_name']}** • {match['map'] or 'TBA'} • {len(events)} reported elimination(s).",
+            color=discord.Color.from_rgb(239, 68, 68)
+        )
+        embed.set_footer(
+            text=f"🐺 {SERVER_NAME} • Combat Feed • Developed by {DEVELOPER}"
+        )
+        await interaction.followup.send(
+            embed=embed,
+            file=discord.File(feed_img, filename="killfeed.png")
+        )
+
+    @match.command(
+        name="countdown",
+        description="Post a countdown to match start"
+    )
+    @app_commands.describe(match_id="Match ID")
+    async def match_countdown(
+        self,
+        interaction: discord.Interaction,
+        match_id: int
+    ):
+        db = await connect()
+        try:
+            cur = await db.execute(
+                """
+                SELECT m.match_no, m.map, m.scheduled_at, t.name AS tournament_name
+                FROM matches m
+                JOIN tournaments t ON t.id = m.tournament_id
+                WHERE m.id=?
+                """,
+                (match_id,)
+            )
+            match = await cur.fetchone()
+        finally:
+            await db.close()
+
+        if not match:
+            return await interaction.response.send_message(
+                embed=err("Match not found."),
+                ephemeral=True
+            )
+
+        embed = base(
+            f"⏰ COUNTDOWN — MATCH #{match['match_no']}",
+            f"**{match['tournament_name']}** • 🗺️ {match['map'] or 'TBA'}",
+            color=discord.Color.from_rgb(59, 130, 246)
+        )
+
+        when = _parse_schedule(match["scheduled_at"])
+        if when:
+            ts = int(when.timestamp())
+            embed.add_field(
+                name="🚀 Drop Time",
+                value=f"<t:{ts}:F>\n<t:{ts}:R>",
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name="🚀 Drop Time",
+                value=f"`{match['scheduled_at'] or 'TBA'}`\nStaff: set a parseable time (e.g. `21:00` or `2026-10-07 21:00`) for a live countdown.",
+                inline=False
+            )
+
+        embed.add_field(
+            name="📋 Checklist",
+            value=(
+                "▸ Be in the Discord lobby **15 minutes** early\n"
+                "▸ Room credentials arrive via DM from staff\n"
+                "▸ Squad must field the registered 4+1 roster"
+            ),
+            inline=False
+        )
+        embed.set_footer(
+            text=f"🐺 {SERVER_NAME} • Match Countdown • Developed by {DEVELOPER}"
+        )
+        await interaction.response.send_message(embed=embed)
+
+    # =========================================================
+    # GOD-TIER: STUDENT ALIAS (info) + VERIFIED STUDENT LIST
+    # =========================================================
+
+    # /student info — canonical profile command
+    student.command(
+        name="info",
+        description="View a verified Leading University student profile"
+    )(student_profile_cmd.callback)
+
+    @student.command(
+        name="list",
+        description="List verified Leading University students (optionally by batch)"
+    )
+    @app_commands.describe(
+        batch="Optional CSE batch filter (e.g. 60, 59, 58)",
+        limit="Maximum entries to show (default 25, max 25)"
+    )
+    async def student_list(
+        self,
+        interaction: discord.Interaction,
+        batch: str = "",
+        limit: int = 25
+    ):
+        limit = max(1, min(25, limit))
+        batch = batch.strip()
+
+        db = await connect()
+        try:
+            if batch:
+                cur = await db.execute(
+                    """
+                    SELECT * FROM student_verifications
+                    WHERE batch = ?
+                    ORDER BY batch ASC, section ASC, full_name ASC
+                    LIMIT ?
+                    """,
+                    (batch, limit)
+                )
+            else:
+                cur = await db.execute(
+                    """
+                    SELECT * FROM student_verifications
+                    ORDER BY batch DESC, section ASC, full_name ASC
+                    LIMIT ?
+                    """,
+                    (limit,)
+                )
+            rows = await cur.fetchall()
+            cur = await db.execute("SELECT COUNT(*) AS c FROM student_verifications")
+            total = (await cur.fetchone())["c"]
+        finally:
+            await db.close()
+
+        embed = discord.Embed(
+            title="🎓 Root LU • VERIFIED STUDENT DIRECTORY",
+            description=(
+                "Official verified Leading University students"
+                + (f" — **Batch {batch}**" if batch else "")
+                + f" • {total} verified in total."
+            ),
+            color=discord.Color.from_rgb(59, 130, 246),
+            timestamp=discord.utils.utcnow()
+        )
+
+        if not rows:
+            embed.description += "\n\n⚠️ *No verified students found.*"
+        else:
+            lines = [
+                f"`{i:02d}` **{r['full_name']}** • `{r['student_id']}` • "
+                f"{r['department']} Batch {r['batch']} (Sec {r['section']}) • <@{r['user_id']}>"
+                for i, r in enumerate(rows, 1)
+            ]
+            embed.add_field(
+                name=f"📋 Verified Students ({len(rows)})",
+                value="\n".join(lines)[:1024],
+                inline=False
+            )
+        embed.set_footer(
+            text=f"🐺 {SERVER_NAME} • Student Directory • Developed by {DEVELOPER}"
+        )
+        await interaction.response.send_message(embed=embed)
+
+    # =========================================================
+    # GOD-TIER: SECTION STATS (CSE batch & section aggregates)
+    # =========================================================
+
+    @section.command(
+        name="stats",
+        description="CSE section stats: squads, players, kills & points per section"
+    )
+    @app_commands.describe(
+        tournament_id="Tournament ID (optional, leave 0 for all tournaments)"
+    )
+    async def section_stats(
+        self,
+        interaction: discord.Interaction,
+        tournament_id: int = 0
+    ):
+        if tournament_id < 0:
+            return await interaction.response.send_message(
+                embed=err("Tournament ID must be a non-negative number."),
+                ephemeral=True
+            )
+
+        await interaction.response.defer()
+
+        sections = await section_leaderboard(tournament_id)
+
+        # Count registered players per (batch, section)
+        db = await connect()
+        try:
+            cur = await db.execute(
+                """
+                SELECT COALESCE(NULLIF(TRIM(t.batch), ''), 'General') AS batch,
+                       COALESCE(NULLIF(TRIM(UPPER(t.section)), ''), 'Open') AS section,
+                       COUNT(DISTINCT tm.id) AS players
+                FROM teams t
+                LEFT JOIN team_members tm ON tm.team_id = t.id
+                WHERE (? = 0 OR t.tournament_id = ?)
+                GROUP BY batch, section
+                """,
+                (tournament_id, tournament_id)
+            )
+            player_counts = {(r["batch"], r["section"]): r["players"] for r in await cur.fetchall()}
+        finally:
+            await db.close()
+
+        embed = discord.Embed(
+            title="📊 Root LU • CSE SECTION STATS",
+            description=(
+                "Aggregate competitive stats per CSE batch & section"
+                + (f" for tournament `#{tournament_id}`." if tournament_id else " across all tournaments.")
+            ),
+            color=discord.Color.from_rgb(124, 58, 237),
+            timestamp=discord.utils.utcnow()
+        )
+
+        if not sections:
+            embed.description += "\n\n⚠️ *No squads registered for CSE sections yet.*"
+        else:
+            medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+            for idx, sec in enumerate(sections[:12], start=1):
+                medal = medals.get(idx, f"`#{idx:02d}`")
+                players = player_counts.get((sec["batch"], sec["section"]), 0)
+                batch_str = f"Batch {sec['batch']}" if sec['batch'].lower() not in ('general', 'unassigned') else "General Batch"
+                sec_str = f"Section {sec['section']}" if sec['section'].lower() not in ('open', 'general') else "Open Section"
+                embed.add_field(
+                    name=f"{medal} {batch_str} — {sec_str}",
+                    value=(
+                        f"💎 **{sec['pts']} PTS** • 🔫 **{sec['kills']} Kills**\n"
+                        f"👥 **{sec['teams_count']} Squads** • 🎮 **{players} Players** • 🎮 **{sec['matches']} Matches**"
+                    ),
+                    inline=False
+                )
+
+        embed.set_footer(
+            text=f"🐺 {SERVER_NAME} • Section Statistics • Developed by {DEVELOPER}"
+        )
+        await interaction.followup.send(embed=embed)
+
+
+def _parse_schedule(scheduled_at: str):
+    """Best-effort parse of a scheduled_at string into an aware datetime.
+
+    Supports 'HH:MM', 'today HH:MM', 'tomorrow HH:MM', 'YYYY-MM-DD HH:MM'
+    and ISO-ish formats. Returns None when unparseable.
+    """
+    from config import TZ_OFFSET_MINUTES
+
+    text = (scheduled_at or "").strip()
+    if not text or text.upper() == "TBA":
+        return None
+
+    tz = timezone(timedelta(minutes=TZ_OFFSET_MINUTES))
+    now = datetime.now(tz)
+    low = text.lower()
+
+    candidates = []
+    if low.startswith("today"):
+        candidates.append(("%H:%M", text[5:].strip()))
+        candidates.append(("%I:%M %p", text[5:].strip()))
+    elif low.startswith("tomorrow"):
+        candidates.append(("%H:%M", text[8:].strip()))
+        candidates.append(("%I:%M %p", text[8:].strip()))
+    else:
+        candidates.append(("%H:%M", text))
+        candidates.append(("%I:%M %p", text))
+        candidates.append(("%Y-%m-%d %H:%M", text))
+        candidates.append(("%Y-%m-%d %H:%M:%S", text))
+        candidates.append(("%d-%m-%Y %H:%M", text))
+        candidates.append(("%m/%d/%Y %H:%M", text))
+
+    for fmt, value in candidates:
+        try:
+            parsed = datetime.strptime(value, fmt).replace(tzinfo=tz)
+        except ValueError:
+            continue
+        if parsed < now and fmt in ("%H:%M", "%I:%M %p"):
+            parsed = parsed + timedelta(days=1)
+        return parsed
+    return None
+
+
+# =============================================================
+# SETUP
+# =============================================================
+
 
 async def setup(bot):
     await bot.add_cog(

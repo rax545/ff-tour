@@ -49,6 +49,18 @@ additively; generated images and runtime databases are not part of this change.
 - 🌏 **Timezone Aware:** Times are interpreted in your configured local timezone (`TIMEZONE_UTC_OFFSET`, default `+06:00` Asia/Dhaka) and rendered with Discord `<t:...>` timestamps so every member sees their own local time.
 - 🔁 **Reliable Background Dispatcher:** A 30-second background loop delivers due reminders, survives bot restarts (reminders persist in SQLite), auto-skips past offsets, and cascades clean-up when matches are deleted.
 
+### 🎨 God-Tier Broadcast Graphics & Esports Economy
+- 🖼️ **17 Pillow-generated cyberpunk/esports cards** in `utils/banner.py` (tournament/match banners, VIP room pass, 12-team points table, Booyah, MVP, live stream, gamer passport, certificate, 12-slot dropmap, VERSUS clash poster, Hall of Fame, knockout bracket, kill feed, broadcast lower-third, FUT Ultimate player card, WANTED bounty poster) — all branded **Root LU • Leading University CSE • Developed by Joy**.
+- 💰 **Coin economy:** `/coin balance|daily|tip|leaderboard` with an atomic audited ledger.
+- 🚨 **Bounty board:** `/bounty place|board|claim|cancel` — lock coins on a target, post a WANTED poster, claim the reward when they are eliminated.
+- 🎯 **Match predictions:** `/match predict` stakes coins; `/match end` crowns the winner with a Booyah card and pays out 2x.
+- 🧩 **Knockout brackets:** `/tournament bracket` — seeded single-elimination tree with byes.
+- 🏛️ **Hall of Fame:** `/tournament halloffame` — auto-inducts champions on tournament close.
+- 🛡️ **Security center:** `/security scan|history` — integrity scans persisted to SQLite.
+- 👤 **Player identity:** `/player passport|card` — cyberpunk passport + FUT Ultimate card (OVR & 6 attributes).
+- 🎓 **Student directory:** `/student list` + `/student info`; **`/section stats`** aggregates.
+- 🛰️ **Hosting:** built-in aiohttp keep-alive server on `$PORT` (default 10000) for Render free-tier 24/7 uptime.
+
 ### 🐺 Tournament & Esports Core Features
 - 🐺 **Dynamic Tournament Banners:** High-resolution banners auto-generated via Pillow (PIL) featuring server branding (**Root LU**), tournament title, prize pool, squad slots, entry fee, and wolf crests.
 - 👥 **Full 4+1 Squad Lineups & Roles:** Register complete 4-player active rosters + 1 optional 5th player (Extra Substitute) with official Free Fire roles (IGL, Rusher, Sniper, Assaulter, Support, Substitute).
@@ -87,38 +99,105 @@ python bot.py
 
 ## 📋 Slash Commands Overview
 
-### 🏛️ Section & Student Commands
-- `/section leaderboard [tournament_id]` — Show CSE Batch & Section point tables and rankings.
-- `/student verify <student_id> <name> <batch> <section> [department]` — Verify official Student ID.
-- `/student profile [member]` — View verified student profile and team affiliations.
+### 🏆 Tournament Commands (`/tournament`)
+- `/tournament create <name> <max_teams> [entry_fee] [prize_pool] [description]` — Create and publish a tournament panel with a premium banner.
+- `/tournament close <tournament_id>` — Close registration and auto-induct the verified champion into the Hall of Fame.
+- `/tournament leaderboard <tournament_id>` — Verified standings embed + 12-team points table graphic.
+- `/tournament slotlist <tournament_id>` — 12-slot lobby dropmap & grid graphic.
+- `/tournament bracket <tournament_id> [regenerate]` — Single-elimination knockout bracket tree graphic.
+- `/tournament halloffame [tournament_id]` — All-Time Hall of Fame & trophy cabinet graphic.
+- `/tournament list` / `/tournament fixtures` / `/tournament slots` / `/tournament rules` — Hub, schedule, slot list & rulebook.
 
-### 🏆 Tournament Commands
-- `/tournament create <name> <max_teams> [entry_fee] [prize_pool] [description]` — Create and publish tournament panel.
-- `/tournament fixtures <tournament_id>` — View match fixtures and 5-map rotation schedule.
-- `/tournament list` — List all active tournaments.
-- `/tournament slots <tournament_id> [page]` — Show registered lobby slots.
-- `/tournament rules` — Display tournament rulebook.
-- `/tournament close <tournament_id>` — Close registration.
+### 🛡️ Team Commands (`/team`) — 4+1 Squad Lineup System
+- `/team register <tournament_id> <name> <tag> <captain_ign> <captain_uid> [batch] [section] ...` — Register a full **4 active starters + 1 substitute (5th player)** squad. Collects Free Fire UID, IGN and Combat Role (**Rusher, Sniper, IGL, Assaulter, Support, Substitute**) for every player, plus CSE Batch & Section (autofilled from verified student profiles). (`/team create` remains as an alias.)
+- `/team info <team_id>` — Show a squad's full 4+1 lineup, UIDs, roles and batch/section. (`/team roster` remains as an alias.)
+- `/team myteam` — Show every squad you captain or play for.
+- `/team addplayer <team_id> <ign> <uid> [role] [member] [is_substitute]` — Add a starter or the 5th substitute (max 4 starters + 1 sub enforced).
 
-### 🛡️ Team Commands
-- `/team create <tournament_id> <name> <tag> <captain_ign> <captain_uid> [batch] [section] ...` — Register full 4+1 squad with batch & section.
-- `/team roster <team_id>` — View squad roster, roles, UIDs, batch & section.
-- `/team addplayer <team_id> <ign> <uid> [role] [member] [is_substitute]` — Add starter or substitute.
+### 🎮 Match Commands (`/match`) — Full Lifecycle
+- `/match create <tournament_id> <match_no> <map_name> [scheduled_at]` — Create match, dispatch OG battle DMs with match banner + VIP room pass cards.
+- `/match credentials <match_id> <room_id> <password>` — Release room credentials and DM captains a personalized VIP room pass. (`/match room` remains as an alias.)
+- `/match start <match_id>` — Staff: mark a match LIVE and broadcast a lower-third news ticker graphic.
+- `/match end <match_id> <winner_team_id>` — Staff: complete a match, post the Booyah winner card and resolve coin predictions.
+- `/match dropmap <match_id>` — Post the 12-slot lobby dropmap & grid for the match's tournament.
+- `/match warrooms <match_id>` — Staff: create/synchronize private war rooms for every squad.
+- `/match cleanup_warrooms <match_id>` — Staff: delete all war rooms for the tournament's squads.
+- `/match clash <match_id> <team_a_id> <team_b_id>` — Head-to-head VERSUS squad clash poster.
+- `/match predict <match_id> <team_id> <amount>` — Stake coins on a squad (2x payout on win).
+- `/match killfeed <match_id>` — Live combat kill feed graphic from verified match results.
+- `/match countdown <match_id>` — Countdown to match start with Discord relative timestamps.
+- `/match stream` / `/match streamstatus` / `/match streamstop` — Live stream broadcast lifecycle with HD LIVE card.
 
-### 🎮 Match Commands
-- `/match create <tournament_id> <match_no> <map_name> [scheduled_at]` — Create match & dispatch DMs.
-- `/match room <match_id> <room_id> <password>` — Release room credentials to captains.
-- `/match stream <match_id> <stream_url> <platform>` — Start a live broadcast announcement and notify all registered players.
-- `/admin notifychannel <channel>` — Set the server's persistent live-notification channel (staff only).
+### 🛡️ Player Commands (`/player`)
+- `/player passport [member]` — Cyberpunk gamer passport ID card (IGN, UID, role, batch/section, verified stats).
+- `/player card [member]` — FUT-style Ultimate Player trading card with OVR & 6 attributes (PAC, SHO, PAS, DRI, DEF, PHY).
 
-### 📊 Result Commands
-- `/result submit <match_id> <team_id> <placement> <kills>` — Submit squad match result.
-- `/result verify <result_id>` — Verify match score.
-- `/result leaderboard <tournament_id>` — Show verified squad leaderboard.
-- `/result topfraggers [tournament_id] [limit]` — Show top individual kill fraggers & MVP.
-- `/result table <tournament_id> [page]` — Generate 1200x880 graphical points table.
-- `/result booyah <tournament_id>` — Generate golden Booyah winner card.
-- `/result mvp <tournament_id>` — Generate cyberpunk MVP card.
+### 🚨 Bounty Commands (`/bounty`) — WANTED: DEAD OR ELIMINATED
+- `/bounty place <target> <amount> [reason]` — Lock coins on a target's head and post a cyberpunk WANTED poster.
+- `/bounty board` — Bounty rules & active targets.
+- `/bounty claim <bounty_id> <match_id>` — Claim the reward when the target's squad is eliminated in a verified match.
+- `/bounty cancel <bounty_id>` — Cancel a bounty you placed (full refund; staff can cancel any).
+
+### 💰 Coin Commands (`/coin`) — Root LU Economy
+- `/coin balance [member]` — Check a coin balance.
+- `/coin daily` — Claim the daily reward (24h cooldown).
+- `/coin tip <member> <amount>` — Tip another member.
+- `/coin leaderboard` — Top coin holders.
+
+### 🎓 Certificate Commands (`/certificate`)
+- `/certificate generate <tournament_id> <team_id> [award]` — Generate your own Certificate of Esports Excellence card.
+- `/certificate issue` / `/certificate verify` / `/certificate revoke` — Staff registry management.
+
+### 🎓 Student Commands (`/student`)
+- `/student verify <student_id> <name> <batch> <section> [department]` — Verify official Leading University Student ID.
+- `/student info [member]` — View a verified student profile. (`/student profile` remains as an alias.)
+- `/student list [batch] [limit]` — Verified student directory.
+
+### 🏛️ Section Commands (`/section`)
+- `/section leaderboard [tournament_id]` — CSE Batch & Section points table and rankings.
+- `/section stats [tournament_id]` — Aggregate squads, players, kills & points per section.
+
+### 🛡️ Security Commands (`/security`)
+- `/security scan [scope]` — Staff: full integrity scan (incomplete rosters, duplicate UIDs, unverified captains, negative balances, open reports, stale rooms).
+- `/security history` — Recent scan reports.
+
+### 📊 Result Commands (`/result`)
+- `/result submit` / `/result verify` / `/result leaderboard` / `/result topfraggers` / `/result table` / `/result booyah` / `/result mvp` — Scoring, verification, fragger MVP, and the points-table / Booyah / MVP graphics.
+
+## 🎨 God-Tier Broadcast & Esports Pillow Graphics (`utils/banner.py`)
+
+All graphics use a high-contrast cyberpunk/esports aesthetic and carry the **Root LU • Leading University CSE • Developed by Joy** footer on every card:
+
+| # | Generator | Card |
+|---|-----------|------|
+| 1 | `generate_tournament_banner` | Tournament Banner (1200×520) |
+| 2 | `generate_match_banner` | Match Announcement Banner (1200×460) |
+| 3 | `generate_room_pass_card` | Personalized VIP Room Pass (1100×500) |
+| 4 | `generate_points_table_graphic` | 12-Team Points Table Leaderboard (1200×880) |
+| 5 | `generate_booyah_card` | Booyah Winner Celebration Card (1200×630) |
+| 6 | `generate_mvp_card` | MVP Player of the Match Card (1200×630) |
+| 7 | `generate_live_stream_card` | YouTube/Twitch Live Stream Card (1280×720) |
+| 8 | `generate_player_passport_card` | Cyberpunk Gamer Passport ID Card (960×600) |
+| 9 | `generate_certificate_card` | Certificate of Esports Excellence (1600×1000) |
+| 10 | `generate_slotlist_card` | 12-Slot Lobby Dropmap & Grid (1280×840) |
+| 11 | `generate_matchup_clash_card` | Head-to-Head VERSUS Squad Clash Poster (1200×700) |
+| 12 | `generate_hall_of_fame_card` | All-Time Hall of Fame & Trophy Cabinet (1280×800) |
+| 13 | `generate_tournament_bracket_card` | Knockout Tournament Bracket Tree (dynamic) |
+| 14 | `generate_killfeed_card` | Live Combat Kill Feed Graphic (1280×640) |
+| 15 | `generate_broadcast_lowerthird_card` | Broadcast Lower-Third News Ticker (1920×220) |
+| 16 | `generate_ultimate_player_card` | FUT-Style Ultimate Player Trading Card with OVR & 6 attributes (600×900) |
+| 17 | `generate_bounty_poster` | Cyberpunk "WANTED: DEAD OR ELIMINATED" Bounty Poster (900×1200) |
+
+## 💰 Coin Economy, Bounties & Predictions
+
+- **Atomic ledger:** every balance change writes a `coins` upsert + `coin_transactions` audit row in one transaction.
+- **Daily rewards** (`/coin daily`) with a 24-hour cooldown tracked in `daily_claims`.
+- **Tips** (`/coin tip`) move coins between members with balance validation.
+- **Bounties** (`/bounty place`) lock coins on a target; hunters claim the full reward when the target's squad is eliminated (placement > #1) in a verified match. Winners void the hunt; placers/staff can cancel for a refund.
+- **Match predictions** (`/match predict`) stake coins per user per match; `/match end` resolves them at 2x payout for winners.
+- **Hall of Fame:** closing a tournament with verified results auto-inducts the champion (`/tournament halloffame` shows the trophy cabinet).
+- **Knockout brackets:** `/tournament bracket` seeds squads into a single-elimination tree (standard 1-vs-last seeding with byes).
+- **Security scans:** `/security scan` checks roster completeness, duplicate FF UIDs, duplicate squad names, unverified captains, negative balances, open reports and stale rooms — and persists every report.
 
 ## 🆕 Player Arena: passports, certificates, slot grid & squad rooms
 
@@ -198,7 +277,7 @@ is configured; certificate lookup is always scoped to its issuing guild. Staff
 checks support all comma-separated `ADMIN_ROLE_ID` / `MANAGER_ROLE_ID` values.
 
 ```bash
-python -m unittest discover -s tests -v
+python -m pytest tests/ -q          # or: python -m unittest discover -s tests -v
 ```
 
 The suite covers graphics, migrations, certificate idempotency/revocation/guild

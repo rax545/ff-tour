@@ -1,5 +1,5 @@
 import discord
-from config import SERVER_NAME
+from config import SERVER_NAME, DEVELOPER
 
 
 def base(
@@ -13,7 +13,7 @@ def base(
         color=color,
         timestamp=discord.utils.utcnow()
     )
-    e.set_footer(text=f"🐺 {SERVER_NAME} • Esports Management")
+    e.set_footer(text=f"🐺 {SERVER_NAME} • Developed by {DEVELOPER}")
     return e
 
 
@@ -140,7 +140,7 @@ def og_match_dm_embed(
         inline=False
     )
     embed.set_footer(
-        text=f"🐺 {server_name} • Elite Free Fire Esports League"
+        text=f"🐺 {server_name} • Elite Free Fire Esports League • Developed by {DEVELOPER}"
     )
     return embed
 
@@ -200,7 +200,7 @@ def stream_live_dm_embed(
         inline=False
     )
     embed.set_footer(
-        text=f"🐺 {server_name} • Live Broadcast Center"
+        text=f"🐺 {server_name} • Live Broadcast Center • Developed by {DEVELOPER}"
     )
     return embed
 
@@ -273,7 +273,7 @@ def og_room_dm_embed(
         inline=False
     )
     embed.set_footer(
-        text=f"🐺 {server_name} • Free Fire Esports Arena"
+        text=f"🐺 {server_name} • Free Fire Esports Arena • Developed by {DEVELOPER}"
     )
     return embed
 
@@ -352,5 +352,5 @@ def match_reminder_embed(
         ),
         inline=False
     )
-    embed.set_footer(text=f"🐺 {server_name} • Automated Match Reminder")
+    embed.set_footer(text=f"🐺 {server_name} • Automated Match Reminder • Developed by {DEVELOPER}")
     return embed
