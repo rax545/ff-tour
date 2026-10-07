@@ -44,7 +44,7 @@ class SchemaTests(unittest.IsolatedAsyncioTestCase):
             await db.close()
         expected = {
             "coins", "coin_transactions", "daily_claims", "bounties",
-            "predictions", "hall_of_fame", "bracket_matches", "security_scans",
+            "predictions", "hall_of_fame_entries", "bracket_matches", "security_scans",
         }
         self.assertTrue(expected.issubset(tables), f"missing: {expected - tables}")
 
@@ -396,11 +396,11 @@ class HallOfFameTests(unittest.IsolatedAsyncioTestCase):
                 (t_id,))
             team_id = cur.lastrowid
             await db.execute(
-                "INSERT INTO hall_of_fame (tournament_id, team_id, team_name, team_tag, "
+                "INSERT INTO hall_of_fame_entries (tournament_id, team_id, team_name, team_tag, "
                 "achievement, points, kills, season) VALUES (?, ?, 'Champs', 'CH', 'CHAMPION', 99, 40, '2026 Season')",
                 (t_id, team_id))
             await db.commit()
-            cur = await db.execute("SELECT * FROM hall_of_fame WHERE tournament_id=?", (t_id,))
+            cur = await db.execute("SELECT * FROM hall_of_fame_entries WHERE tournament_id=?", (t_id,))
             row = await cur.fetchone()
             self.assertIsNotNone(row)
             self.assertEqual(row["achievement"], "CHAMPION")

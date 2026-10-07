@@ -1,0 +1,48 @@
+name: Bot tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  offline-tests:
+    name: Python ${{ matrix.python }} / discord.py ${{ matrix.discord }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+        discord: ["minimum", "latest"]
+    env:
+      DISCORD_TOKEN: ""
+      GUILD_ID: "0"
+      TIMEZONE_UTC_OFFSET: "+06:00"
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements-dev.txt
+          if [ "${{ matrix.discord }}" = minimum ]; then
+            python -m pip install 'discord.py==2.4.0'
+          fi
+      - name: Lint and syntax
+        run: |
+          python -m ruff check .
+          python -m compileall -q bot.py config.py cogs database services utils views tests
+      - name: Test without Discord credentials
+        run: python -m unittest discover -s tests -v
+      - name: Verify runtime data was not modified
+        run: git diff --exit-code -- data/esports.sqlite3

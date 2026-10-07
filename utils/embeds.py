@@ -1,5 +1,5 @@
 import discord
-from config import BRAND, SERVER_NAME, SERVER_NAME_CLEAN, DEVELOPER
+from config import SERVER_NAME, DEVELOPER
 
 
 def base(

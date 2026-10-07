@@ -7,12 +7,12 @@ due-reminder querying, status updates and cancellation.
 import os
 import sys
 import unittest
+import tempfile
+from unittest.mock import patch
+import database.db as db_module
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-# Use an isolated database for this test module
-os.environ.setdefault("DATABASE_PATH", "data/test_reminders.sqlite3")
 
 from config import TZ_OFFSET_MINUTES
 from database.db import connect, init_db
@@ -26,7 +26,6 @@ from services.reminders import (
     pending_reminders,
     mark_reminder,
     cancel_match_reminders,
-    iso,
     local_tz,
 )
 from utils.embeds import match_reminder_embed
@@ -105,6 +104,9 @@ class ParsingTests(unittest.TestCase):
 class ReminderDbTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path_patch = patch.object(db_module, 'DATABASE_PATH', os.path.join(self.tmp.name, 'reminders.sqlite3'))
+        self.path_patch.start()
         await init_db()
         self.db = await connect()
 
@@ -128,6 +130,8 @@ class ReminderDbTests(unittest.IsolatedAsyncioTestCase):
         )
         await self.db.commit()
         await self.db.close()
+        self.path_patch.stop()
+        self.tmp.cleanup()
 
     async def test_schedule_and_list(self):
         match_time = datetime.now(timezone.utc) + timedelta(hours=2)

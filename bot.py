@@ -57,10 +57,13 @@ class EsportsBot(commands.Bot):
             "cogs.support",
             "cogs.reminders",
             "cogs.arena",
+            "cogs.competition",
             "cogs.economy",
             "cogs.players",
             "cogs.security",
         ):
+            await self.load_extension(ext)
+            logger.info("Loaded extension: %s", ext)
             await self.load_extension(ext)
             logger.info("Loaded extension: %s", ext)
 

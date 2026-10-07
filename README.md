@@ -2,6 +2,32 @@
 
 A high-end, production-grade Free Fire esports tournament Discord management bot customized for Leading University's **Root LU** community. Features CSE batch & section rankings, official student ID verification, individual fragger tracking & MVP rankings, match fixtures with official 5-map rotation, dynamic tournament banners, automated match dispatch DMs, custom room credential delivery, interactive registration panels, and real-time verified leaderboards.
 
+## 🆕 Complete Arena expansion
+
+Eight integrated Discord features are available now: **live stream lifecycle,
+Hall of Fame, bracket tree, private player passport, squad clash posters,
+free prediction arena, staff-only anti-smurf review radar, and squad war rooms**
+with tactical notes and persistent ready-check buttons.
+
+| Feature | Main commands |
+| --- | --- |
+| Live streams & replay | `/match stream`, `/match streamstop`, `/live list` |
+| Champions gallery | `/halloffame induct`, `/halloffame show` |
+| Knockout bracket | `/bracket create`, `/bracket tree`, `/bracket bind`, `/bracket resolve` |
+| Player passport & stats | `/passport`, `/result player`, `/result mvp` |
+| Versus poster | `/clash poster` |
+| Free prediction arena | `/prediction open`, `/prediction arena`, `/prediction settle` |
+| Private anti-smurf review | `/radar scan`, `/radar list`, `/radar review` |
+| Squad war room | `/squad warroom`, `/squad plan`, `/squad briefing`, `/squad readycheck` |
+
+**[Complete command guide, বাংলা quickstart, deployment and smoke tests →](docs/arena.md)**
+
+Prediction points have no monetary value. Radar findings are human-review leads,
+not proof of smurfing, and never cause automatic bans. Passport identity is
+roster-linked, not official Garena verification. Run one bot/database per server,
+set `GUILD_ID`, and back up SQLite before upgrading. Existing data is migrated
+additively; generated images and runtime databases are not part of this change.
+
 ## ✨ Features & Capabilities
 
 ### 🎓 Leading University & CSE Features
@@ -47,13 +73,13 @@ A high-end, production-grade Free Fire esports tournament Discord management bot
 - 🎫 **Support Tickets:** `/ticket` creates private text channels for tournament inquiries and dispute resolution.
 
 ## 🚀 Installation & Setup
-Python 3.11+ is recommended.
+Python 3.11+ is required.
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Configure environment variables in `.env`:
+Copy `.env.example` to `.env`, then configure environment variables locally (never commit your token):
 ```env
 DISCORD_TOKEN=your_bot_token_here
 GUILD_ID=your_guild_id_here
@@ -183,17 +209,22 @@ startup; back up `DATABASE_PATH` before upgrading. No extra dependencies are nee
 - `/match stream <match_id> <stream_url> [platform]` — staff broadcasts an HD live
   card and Watch Live button using the existing announcement/DM workflow. Links
   now receive structural validation; this does not check whether a stream is
-  actually online. Platform labels are limited to 40 characters.
+  actually online. Platform labels are limited to 40 characters. Identical live
+  requests avoid duplicate announcements/DMs; `rebroadcast:true` explicitly resends.
+  Announcements are posted before bounded, deduplicated DM fan-out.
 - `/match streamstatus <match_id>` — display LIVE/OFFLINE and a live/replay button.
 - `/match streamstop <match_id>` — staff marks a stream offline, retaining its URL
-  for replay. This does not finish the match or stop a stream on YouTube/Twitch.
+  for replay and refreshes the saved announcement best-effort. This does not finish
+  the match or stop a stream on YouTube/Twitch. `/live list` shows current broadcasts.
 
 ### Private player passport
 - `/passport` — generates a 1200×720 PNG visible only to the requesting player,
   with linked IGN/Free Fire UID, roles, recent squad affiliations and batch/section.
 - Link a player's Discord account with `/team addplayer ... member:@player`.
-- Only **verified individual `player_results`** matching the linked UID and squad
-  contribute kills/damage. Squad result kills are never attributed to individuals.
+- Only **verified individual `player_results`** matching the linked UID, squad and
+  fixture contribute kills/damage. Conflicting owners and duplicate UID/match rows
+  are excluded. Staff can record them with `/result player` (member IDs are shown
+  by `/team roster`). Squad result kills are never attributed to individuals.
   Without individual result data the passport correctly shows zero recorded stats.
 - Student IDs and room credentials are not included. The graphic shows up to five
   most recent roster entries; it is a roster summary, not identity authentication.
@@ -252,5 +283,8 @@ python -m pytest tests/ -q          # or: python -m unittest discover -s tests -
 The suite covers graphics, migrations, certificate idempotency/revocation/guild
 scope, verified player stats, stream lifecycle, URL validation, staff permissions,
 mocked room creation/sync/close/rollback and offline extension registration.
-Discord delivery and channel permissions should additionally be smoke-tested in
-an actual test server with a configured bot token.
+Tests use temporary databases, not your runtime SQLite data. CI checks Python
+3.11/3.12 with minimum and latest supported discord.py. Install developer tooling
+with `pip install -r requirements-dev.txt` and run `python -m ruff check .`.
+Discord delivery and channel permissions must additionally be smoke-tested in
+an actual test server with a configured bot token; see [the checklist](docs/arena.md#required-real-server-smoke-test-not-simulated-by-unit-tests).
