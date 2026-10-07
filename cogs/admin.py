@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 
-from config import SERVER_NAME
+from config import SERVER_NAME, DEVELOPER
 from database.db import connect, audit, set_setting
 from utils.embeds import base, ok, err
 from utils.permissions import require_staff
@@ -45,7 +45,7 @@ class Admin(commands.Cog):
             ),
             inline=False
         )
-        e.set_footer(text=f"🐺 {SERVER_NAME} • Elite Operations")
+        e.set_footer(text=f"🐺 {SERVER_NAME} • Elite Operations • Developed by {DEVELOPER}")
         await interaction.response.send_message(embed=e, ephemeral=True)
 
     @admin.command(name="notifychannel", description="Set the live broadcast notification channel")

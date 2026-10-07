@@ -247,6 +247,122 @@ CREATE TABLE IF NOT EXISTS reminders (
         REFERENCES tournaments(id)
         ON DELETE CASCADE
 );
+
+
+-- ============================================================
+-- GOD-TIER EXPANSION: coin economy, bounties, predictions,
+-- hall of fame, knockout brackets and security scans
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS coins (
+    user_id INTEGER PRIMARY KEY,
+    balance INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+
+CREATE TABLE IF NOT EXISTS coin_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    amount INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    counterparty_id INTEGER DEFAULT 0,
+    note TEXT DEFAULT '',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+
+CREATE TABLE IF NOT EXISTS daily_claims (
+    user_id INTEGER NOT NULL,
+    claim_date TEXT NOT NULL,
+    claimed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (user_id, claim_date)
+);
+
+
+CREATE TABLE IF NOT EXISTS bounties (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    placer_id INTEGER NOT NULL,
+    target_id INTEGER NOT NULL,
+    amount INTEGER NOT NULL,
+    reason TEXT DEFAULT '',
+    status TEXT DEFAULT 'active',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    resolved_at TEXT,
+    claimed_by INTEGER DEFAULT 0,
+
+    CHECK (status IN ('active', 'claimed', 'cancelled'))
+);
+
+
+CREATE TABLE IF NOT EXISTS predictions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    team_id INTEGER NOT NULL,
+    amount INTEGER NOT NULL,
+    status TEXT DEFAULT 'pending',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    resolved_at TEXT,
+
+    UNIQUE(match_id, user_id),
+
+    FOREIGN KEY (match_id)
+        REFERENCES matches(id)
+        ON DELETE CASCADE,
+
+    FOREIGN KEY (team_id)
+        REFERENCES teams(id)
+        ON DELETE CASCADE
+);
+
+
+CREATE TABLE IF NOT EXISTS hall_of_fame (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tournament_id INTEGER NOT NULL,
+    team_id INTEGER NOT NULL,
+    team_name TEXT NOT NULL,
+    team_tag TEXT DEFAULT '',
+    achievement TEXT NOT NULL,
+    points INTEGER DEFAULT 0,
+    kills INTEGER DEFAULT 0,
+    season TEXT DEFAULT '',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (tournament_id)
+        REFERENCES tournaments(id)
+        ON DELETE CASCADE
+);
+
+
+CREATE TABLE IF NOT EXISTS bracket_matches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tournament_id INTEGER NOT NULL,
+    round INTEGER NOT NULL,
+    slot INTEGER NOT NULL,
+    team_a_id INTEGER DEFAULT 0,
+    team_b_id INTEGER DEFAULT 0,
+    winner_id INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'pending',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE(tournament_id, round, slot),
+
+    FOREIGN KEY (tournament_id)
+        REFERENCES tournaments(id)
+        ON DELETE CASCADE
+);
+
+
+CREATE TABLE IF NOT EXISTS security_scans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scanner_id INTEGER NOT NULL,
+    scope TEXT DEFAULT 'full',
+    findings_count INTEGER DEFAULT 0,
+    findings TEXT DEFAULT '[]',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 

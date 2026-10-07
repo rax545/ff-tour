@@ -3,9 +3,10 @@ import asyncio
 import discord
 from discord import app_commands
 from discord.ext import commands
+from config import SERVER_NAME
 from services.arena import player_passport, issue_certificate, verify_certificate, revoke_certificate
 from services.war_rooms import WarRoomService
-from utils.cards import passport, certificate
+from utils.banner import generate_certificate_card, generate_player_passport_card
 from utils.embeds import base, err, ok
 from utils.permissions import require_staff
 
@@ -26,7 +27,19 @@ class Arena(commands.Cog):
         rosters, stats, student = await player_passport(interaction.user.id)
         if not rosters:
             return await interaction.followup.send(embed=err('No linked player roster. Ask your captain to link your Discord account via /team addplayer.'), ephemeral=True)
-        image = await asyncio.to_thread(passport, interaction.user.display_name, rosters, stats, student)
+        primary = rosters[0]
+        image = await asyncio.to_thread(
+            generate_player_passport_card,
+            interaction.user.display_name,
+            primary['ign'],
+            primary['uid'],
+            primary['role'],
+            primary.get('batch') or (student['batch'] if student else ''),
+            primary.get('section') or (student['section'] if student else ''),
+            stats['kills'],
+            stats['matches'],
+            SERVER_NAME
+        )
         await interaction.followup.send(file=discord.File(image, filename='player-passport.png'),
             content='Private passport • Only verified individual results are counted. Student ID is never included.', ephemeral=True)
 
@@ -40,9 +53,43 @@ class Arena(commands.Cog):
             record = await issue_certificate(interaction.guild.id, tournament_id,team_id,recipient.id,award,interaction.user.id)
         except ValueError as exc:
             return await interaction.followup.send(embed=err(str(exc)), ephemeral=True)
-        image = await asyncio.to_thread(certificate,record)
+        image = await asyncio.to_thread(
+            generate_certificate_card,
+            record['recipient_name'],
+            record['award'],
+            record['tournament_name'],
+            record['team_name'],
+            record['code'],
+            record['issued_at'],
+            SERVER_NAME
+        )
         await interaction.followup.send(file=discord.File(image,filename=f'{record["code"]}.png'),
             content=f'Certificate `{record["code"]}` • Share this image with the recipient. Verify using `/certificate verify`.', ephemeral=True)
+
+    @certificate_group.command(name='generate', description='Generate your own Certificate of Esports Excellence card for a squad award')
+    async def generate(self, interaction: discord.Interaction, tournament_id: int, team_id: int,
+                       award: app_commands.Range[str, 1, 80] = 'Tournament Participant'):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            record = await issue_certificate(interaction.guild.id, tournament_id, team_id,
+                                             interaction.user.id, award, interaction.user.id)
+        except ValueError as exc:
+            return await interaction.followup.send(embed=err(str(exc)), ephemeral=True)
+        image = await asyncio.to_thread(
+            generate_certificate_card,
+            record['recipient_name'],
+            record['award'],
+            record['tournament_name'],
+            record['team_name'],
+            record['code'],
+            record['issued_at'],
+            SERVER_NAME
+        )
+        await interaction.followup.send(
+            file=discord.File(image, filename=f'{record["code"]}.png'),
+            content=(f'Certificate `{record["code"]}` • {record["award"]} — verify anytime with '
+                     f'`/certificate verify {record["code"]}`.'),
+            ephemeral=True)
 
     @certificate_group.command(name='verify', description='Check an issued certificate in this server registry')
     async def verify(self, interaction: discord.Interaction, code: str):

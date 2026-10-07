@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 
-from config import SERVER_NAME
+from config import SERVER_NAME, DEVELOPER
 from database.db import connect
 from utils.embeds import base, ok, err
 
@@ -71,7 +71,7 @@ class Support(commands.Cog):
             ),
             color=discord.Color.from_rgb(59, 130, 246)
         )
-        ticket_embed.set_footer(text=f"🐺 {SERVER_NAME} • Support Desk")
+        ticket_embed.set_footer(text=f"🐺 {SERVER_NAME} • Support Desk • Developed by {DEVELOPER}")
         await ch.send(content=f"{interaction.user.mention} Staff has been alerted.", embed=ticket_embed)
 
         await interaction.response.send_message(
