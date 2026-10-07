@@ -11,7 +11,7 @@ permissions:
 jobs:
   offline-tests:
     name: Python ${{ matrix.python }} / discord.py ${{ matrix.discord }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -22,8 +22,10 @@ jobs:
       GUILD_ID: "0"
       TIMEZONE_UTC_OFFSET: "+06:00"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7.0.0
         with:
           python-version: ${{ matrix.python }}
           cache: pip
