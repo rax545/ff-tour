@@ -1,4 +1,3 @@
-import asyncio
 import io
 import os
 import sys
@@ -9,23 +8,16 @@ import aiosqlite
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import SERVER_NAME, BRAND
+from config import SERVER_NAME
 import database.db as db_module
 from database.db import connect, init_db, get_setting, set_setting
-from services.scoring import calculate
-from services.leaderboard import leaderboard, section_leaderboard, top_fraggers
+from services.leaderboard import section_leaderboard, top_fraggers
 from utils.banner import (
     generate_tournament_banner,
     generate_match_banner,
-    generate_wolf_icon,
     clean_text_for_image
 )
 from utils.embeds import (
-    base,
-    ok,
-    err,
-    og_match_dm_embed,
-    og_room_dm_embed,
     stream_live_dm_embed
 )
 from utils.cards import live_broadcast
@@ -35,7 +27,14 @@ from cogs.esports import OFFICIAL_5_MAP_ROTATION
 class FeatureTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path_patch = mock.patch.object(db_module, 'DATABASE_PATH', os.path.join(self.tmp.name, 'features.sqlite3'))
+        self.path_patch.start()
         await init_db()
+
+    async def asyncTearDown(self):
+        self.path_patch.stop()
+        self.tmp.cleanup()
 
     async def test_01_clean_text_and_banners(self):
         # 1. clean_text_for_image
@@ -192,7 +191,6 @@ class FeatureTests(unittest.IsolatedAsyncioTestCase):
         cur = await db.execute("INSERT INTO matches (tournament_id, match_no, map) VALUES (?, 1, 'Bermuda')", (t_id,))
         m1 = cur.lastrowid
         cur = await db.execute("INSERT INTO matches (tournament_id, match_no, map) VALUES (?, 2, 'Purgatory')", (t_id,))
-        m2 = cur.lastrowid
 
         # Submit verified results
         # Team 60A_1: Match 1: 1st place (12 pts) + 8 kills (8 pts) = 20 pts
@@ -287,7 +285,6 @@ class FeatureTests(unittest.IsolatedAsyncioTestCase):
             "VALUES (?, 'Root Broadcasters', 'RB', 4001, '60', 'C')",
             (t_id,)
         )
-        team_id = cur.lastrowid
 
         cur = await db.execute(
             "INSERT INTO matches (tournament_id, match_no, map, scheduled_at) VALUES (?, 1, 'Bermuda', 'Tonight 9 PM')",

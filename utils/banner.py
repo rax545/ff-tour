@@ -1,5 +1,4 @@
 import io
-import math
 import os
 import unicodedata
 from PIL import Image, ImageDraw, ImageFont, ImageFilter

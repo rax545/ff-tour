@@ -135,74 +135,8 @@ async def section_leaderboard(tournament_id: int = 0):
 
 
 async def top_fraggers(tournament_id: int = 0, limit: int = 10):
-    """
-    Get the top-killing fraggers across verified tournament results.
-    """
-    db = await connect()
-    try:
-        # 1. Check if individual player_results exist
-        cur = await db.execute(
-            """
-            SELECT COUNT(*) AS c
-            FROM player_results pr
-            JOIN matches m ON m.id = pr.match_id
-            WHERE (? = 0 OR m.tournament_id = ?) AND pr.verified = 1
-            """,
-            (tournament_id, tournament_id)
-        )
-        has_pr = (await cur.fetchone())["c"] > 0
-
-        if has_pr:
-            cur = await db.execute(
-                """
-                SELECT
-                    pr.ign,
-                    pr.uid,
-                    COALESCE(tm.role, 'Player') AS role,
-                    t.name AS team_name,
-                    t.tag AS team_tag,
-                    COALESCE(t.batch, '') AS batch,
-                    COALESCE(t.section, '') AS section,
-                    SUM(pr.kills) AS kills,
-                    COUNT(DISTINCT pr.match_id) AS matches
-                FROM player_results pr
-                JOIN matches m ON m.id = pr.match_id
-                JOIN teams t ON t.id = pr.team_id
-                LEFT JOIN team_members tm ON tm.team_id = t.id AND (tm.ign = pr.ign OR tm.uid = pr.uid)
-                WHERE (? = 0 OR m.tournament_id = ?) AND pr.verified = 1
-                GROUP BY pr.ign, pr.uid, t.name, t.tag
-                ORDER BY kills DESC, matches ASC, pr.ign ASC
-                LIMIT ?
-                """,
-                (tournament_id, tournament_id, limit)
-            )
-            return await cur.fetchall()
-
-        # 2. Aggregate from verified team results and active players
-        cur = await db.execute(
-            """
-            SELECT
-                tm.ign,
-                tm.uid,
-                tm.role,
-                t.name AS team_name,
-                t.tag AS team_tag,
-                COALESCE(t.batch, '') AS batch,
-                COALESCE(t.section, '') AS section,
-                COALESCE(SUM(r.kills), 0) AS kills,
-                COUNT(DISTINCT r.match_id) AS matches
-            FROM results r
-            JOIN matches m ON m.id = r.match_id
-            JOIN teams t ON t.id = r.team_id
-            JOIN team_members tm ON tm.team_id = t.id AND tm.is_sub = 0
-            WHERE (? = 0 OR m.tournament_id = ?) AND r.verified = 1
-            GROUP BY tm.id, tm.ign, tm.uid, tm.role, t.name, t.tag
-            ORDER BY kills DESC, tm.id ASC
-            LIMIT ?
-            """,
-            (tournament_id, tournament_id, limit)
-        )
-        return await cur.fetchall()
-
-    finally:
-        await db.close()
+    """Verified individual results only; squad kills never become player kills."""
+    from services.arena_common import database
+    from services.player_stats import verified_fraggers
+    async with database() as db:
+        return await verified_fraggers(db, tournament_id, max(1, min(25, limit)))

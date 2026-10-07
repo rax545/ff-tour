@@ -1,17 +1,23 @@
 import io
 import asyncio
 import discord
-from discord.ext import commands
 from discord import app_commands
 
-from config import SERVER_NAME, BRAND
-from database.db import connect, audit, get_setting
-from services.arena import validate_stream_url, stream_status
+from config import SERVER_NAME
+from database.db import connect, audit
+from services.arena import stream_status
+from services.streams import get_stream, start_stream, stop_stream, stream_recipients
+from services.stream_delivery import (notify_players as deliver_stream_dms, post_announcement,
+                                      stream_embed, stream_link_view as broadcast_link_view,
+                                      update_stopped_announcement)
+from services.player_stats import record_player_result
+from services.arena_common import match_teams
 from services.scoring import calculate
 from services.leaderboard import leaderboard, section_leaderboard, top_fraggers
 from utils.banner import generate_tournament_banner, generate_match_banner
-from utils.embeds import base, ok, err, og_match_dm_embed, og_room_dm_embed, stream_live_dm_embed
+from utils.embeds import base, ok, err, og_match_dm_embed, og_room_dm_embed
 from utils.permissions import require_staff
+from utils.interactions import TournamentCog
 from utils.cards import room_pass, points_table, booyah, mvp, live_broadcast, slot_grid
 from views.panels import TournamentPanel
 
@@ -55,38 +61,44 @@ ROLE_BADGES = {
 }
 
 
-class Esports(commands.Cog):
+class Esports(TournamentCog):
     def __init__(self, bot):
         self.bot = bot
 
     tournament = app_commands.Group(
         name="tournament",
-        description="Tournament commands"
+        description="Tournament commands",
+        guild_only=True
     )
 
     team = app_commands.Group(
         name="team",
-        description="Team commands"
+        description="Team commands",
+        guild_only=True
     )
 
     match = app_commands.Group(
         name="match",
-        description="Match commands"
+        description="Match commands",
+        guild_only=True
     )
 
     result = app_commands.Group(
         name="result",
-        description="Result commands"
+        description="Result commands",
+        guild_only=True
     )
 
     section = app_commands.Group(
         name="section",
-        description="CSE Batch & Section standings"
+        description="CSE Batch & Section standings",
+        guild_only=True
     )
 
     student = app_commands.Group(
         name="student",
-        description="Student verification commands"
+        description="Student verification commands",
+        guild_only=True
     )
 
     # =========================================================
@@ -907,7 +919,7 @@ class Esports(commands.Cog):
         for m in members:
             badge = ROLE_BADGES.get(m["role"], f"🎮 {m['role']}")
             mention_str = f" • <@{m['user_id']}>" if m["user_id"] and m["user_id"] > 0 else ""
-            line = f"`Slot {slot_idx}` **{badge}:** `{m['ign']}` • UID: `{m['uid']}`{mention_str}"
+            line = f"`Slot {slot_idx}` (Member `{m['id']}`) **{badge}:** `{m['ign']}` • UID: `{m['uid']}`{mention_str}"
 
             if m["is_sub"]:
                 subs.append(line)
@@ -1170,7 +1182,7 @@ class Esports(commands.Cog):
         try:
             # Tournament check
             cur = await db.execute(
-                "SELECT id, name FROM tournaments WHERE id=?",
+                "SELECT id, name, status FROM tournaments WHERE id=?",
                 (tournament_id,)
             )
 
@@ -1183,6 +1195,9 @@ class Esports(commands.Cog):
                     embed=err("Tournament not found."),
                     ephemeral=True
                 )
+
+            if tournament["status"] == "finished":
+                raise ValueError("This tournament has been finalized in the Hall of Fame.")
 
             # Duplicate match check
             cur = await db.execute(
@@ -1421,6 +1436,8 @@ class Esports(commands.Cog):
                     m.id,
                     m.match_no,
                     m.map,
+                    m.status,
+                    t.status AS tournament_status,
                     m.tournament_id,
                     t.name AS tournament_name
                 FROM matches m
@@ -1440,6 +1457,9 @@ class Esports(commands.Cog):
                     ephemeral=True
                 )
 
+            if match["status"] in ("finished", "cancelled") or match["tournament_status"] == "finished":
+                raise ValueError("Cannot release room credentials for a finalized/cancelled fixture.")
+
             await db.execute(
                 """
                 UPDATE matches
@@ -1456,21 +1476,8 @@ class Esports(commands.Cog):
                 )
             )
 
-            cur = await db.execute(
-                """
-                SELECT DISTINCT t.id, t.name, t.tag, t.captain_id
-                FROM teams t
-                WHERE t.tournament_id=?
-                UNION
-                SELECT DISTINCT t.id, t.name, t.tag, t.captain_id
-                FROM teams t
-                JOIN registrations r ON t.id = r.team_id
-                WHERE r.tournament_id=?
-                """,
-                (match["tournament_id"], match["tournament_id"])
-            )
-
-            teams = await cur.fetchall()
+            teams = await match_teams(db, match, interaction.guild.id)
+            await db.execute("UPDATE prediction_pools SET status='locked' WHERE match_id=? AND status='open'", (match_id,))
 
             await db.commit()
 
@@ -1490,14 +1497,20 @@ class Esports(commands.Cog):
         sent = 0
         failed = 0
 
+        banner = await asyncio.to_thread(generate_match_banner, match['tournament_name'], match['match_no'],
+                                         match['map'] or 'TBA', 'ROOM OPEN', SERVER_NAME)
+        banner_bytes = banner.getvalue()
         for tm in teams:
             member = interaction.guild.get_member(tm["captain_id"])
             if not member:
                 try:
-                    member = await self.bot.fetch_user(tm["captain_id"])
+                    member = await interaction.guild.fetch_member(tm["captain_id"])
                 except Exception:
                     member = None
 
+            if not member or member.bot:
+                failed += 1
+                continue
             if member:
                 dm_embed = og_room_dm_embed(
                     team_name=tm["name"],
@@ -1512,14 +1525,16 @@ class Esports(commands.Cog):
                 )
 
                 try:
+                    access_pass = await asyncio.to_thread(room_pass, tm['name'], match['tournament_name'],
+                                                        match['match_no'], match['map'] or 'TBA')
                     await member.send(
                         content=(
                             f"🚨 **[ {SERVER_NAME} • ROOM PASS ]** 🚨\n"
                             f"Squad **{tm['name']} [{tm['tag']}]**, custom room credentials released!"
                         ),
                         embed=dm_embed,
-                        files=[discord.File(generate_match_banner(match['tournament_name'], match['match_no'], match['map'] or 'TBA', 'ROOM OPEN', SERVER_NAME), filename="match_banner.png"),
-                               discord.File(room_pass(tm['name'], match['tournament_name'], match['match_no'], match['map'] or 'TBA'), filename="vip_pass.png")]
+                        files=[discord.File(io.BytesIO(banner_bytes), filename="match_banner.png"),
+                               discord.File(access_pass, filename="vip_pass.png")]
                     )
                     sent += 1
                 except discord.Forbidden:
@@ -1554,271 +1569,52 @@ class Esports(commands.Cog):
         await interaction.followup.send(embed=embed)
 
     @match.command(name="streamstop", description="Staff: end a live stream while retaining its replay link")
-    async def streamstop(self, interaction: discord.Interaction, match_id: int):
+    async def streamstop(self, interaction: discord.Interaction, match_id: app_commands.Range[int, 1]):
         if not await require_staff(interaction):
             return
         await interaction.response.defer(ephemeral=True)
-        row = await stream_status(match_id, stop=True)
+        row = await stop_stream(match_id, interaction.user.id)
         if not row:
             return await interaction.followup.send(embed=err("Match not found."), ephemeral=True)
-        await audit(interaction.user.id, "stream_stop", str(match_id))
-        await interaction.followup.send(embed=ok("Stream marked offline. Replay link retained."), ephemeral=True)
+        await update_stopped_announcement(interaction.guild, row)
+        await interaction.followup.send(embed=ok("Stream marked offline. Replay link retained; provider streams are not stopped by the bot."), ephemeral=True)
 
     @match.command(name="streamstatus", description="View a match's live status or replay link")
-    async def streamstatus(self, interaction: discord.Interaction, match_id: int):
+    async def streamstatus(self, interaction: discord.Interaction, match_id: app_commands.Range[int, 1]):
         await interaction.response.defer()
         row = await stream_status(match_id)
         if not row:
             return await interaction.followup.send(embed=err("Match not found."), ephemeral=True)
-        embed = base(f"Match #{row['match_no']} • {'LIVE' if row['stream_live'] else 'OFFLINE'}",
-                     row['tournament_name'])
-        view = discord.ui.View()
-        if row['stream_url']:
-            try:
-                url = validate_stream_url(row['stream_url'])
-                view.add_item(discord.ui.Button(label="Watch Live" if row['stream_live'] else "Watch Replay",
-                                                url=url))
-            except ValueError:
-                pass
-        await interaction.followup.send(embed=embed, view=view)
+        embed = stream_embed(row)
+        embed.set_image(url=None)
+        await interaction.followup.send(embed=embed, view=broadcast_link_view(row), allowed_mentions=discord.AllowedMentions.none())
 
-    # =========================================================
-    # MATCH LIVE STREAM BROADCAST
-    # =========================================================
-
-    @match.command(
-        name="stream",
-        description="Go live! Broadcast a stream link, generate an HD card, and DM all registered squads"
-    )
-    @app_commands.describe(
-        match_id="Match ID",
-        stream_url="Live stream URL (YouTube / Facebook / Twitch)",
-        platform="Streaming platform name (e.g. YouTube, Facebook, Twitch)"
-    )
-    async def stream(
-        self,
-        interaction: discord.Interaction,
-        match_id: int,
-        stream_url: str,
-        platform: str = "YouTube"
-    ):
+    @match.command(name="stream", description="Staff: announce an HD live broadcast and notify registered opponents")
+    @app_commands.describe(stream_url="Public YouTube / Twitch / Facebook stream URL",
+                           platform="Platform label, up to 40 characters",
+                           notify_players="Send DMs to current linked players and captains",
+                           rebroadcast="Explicitly re-announce an already-live link (default avoids duplicate DMs)")
+    async def stream(self, interaction: discord.Interaction, match_id: app_commands.Range[int, 1],
+                     stream_url: str, platform: str = "YouTube", notify_players: bool = True, rebroadcast: bool = False):
         if not await require_staff(interaction):
             return
-
-        stream_url = stream_url.strip()
-        platform = platform.strip() or "YouTube"
-
-        try:
-            stream_url = validate_stream_url(stream_url)
-        except ValueError as exc:
-            return await interaction.response.send_message(embed=err(str(exc)), ephemeral=True)
-        if len(platform) > 40:
-            return await interaction.response.send_message(embed=err("Platform must be 40 characters or fewer."), ephemeral=True)
-
-        await interaction.response.defer()
-
-        db = await connect()
-
-        try:
-            cur = await db.execute(
-                """
-                SELECT
-                    m.id,
-                    m.match_no,
-                    m.map,
-                    m.tournament_id,
-                    t.name AS tournament_name
-                FROM matches m
-                JOIN tournaments t ON m.tournament_id = t.id
-                WHERE m.id=?
-                """,
-                (match_id,)
-            )
-
-            match = await cur.fetchone()
-
-            if not match:
-                await db.close()
-
-                return await interaction.followup.send(
-                    embed=err("Match not found."),
-                    ephemeral=True
-                )
-
-            await db.execute(
-                """
-                UPDATE matches
-                SET
-                    stream_url=?,
-                    stream_platform=?,
-                    stream_live=1
-                WHERE id=?
-                """,
-                (
-                    stream_url,
-                    platform,
-                    match_id
-                )
-            )
-
-            cur = await db.execute(
-                """
-                SELECT DISTINCT t.id, t.name, t.tag, t.captain_id
-                FROM teams t
-                WHERE t.tournament_id=?
-                UNION
-                SELECT DISTINCT t.id, t.name, t.tag, t.captain_id
-                FROM teams t
-                JOIN registrations r ON t.id = r.team_id
-                WHERE r.tournament_id=?
-                """,
-                (match["tournament_id"], match["tournament_id"])
-            )
-
-            teams = await cur.fetchall()
-
-            # Collect all squad members too (not just captains) for the broadcast
-            team_recipients = {}
-            for tm in teams:
-                cur = await db.execute(
-                    "SELECT user_id FROM team_members WHERE team_id=?",
-                    (tm["id"],)
-                )
-                m_rows = await cur.fetchall()
-                uids = {tm["captain_id"]}
-                for mr in m_rows:
-                    if mr["user_id"] and mr["user_id"] > 0:
-                        uids.add(mr["user_id"])
-                team_recipients[tm["id"]] = (tm, uids)
-
-            await db.commit()
-
-        except Exception as e:
-            await db.rollback()
-            await db.close()
-
-            return await interaction.followup.send(
-                embed=err(
-                    f"Failed to start live broadcast.\n```{e}```"
-                ),
-                ephemeral=True
-            )
-
-        await db.close()
-
-        map_name = match["map"] or "TBA"
-
-        # Generate the HD (1280x720) LIVE NOW broadcast card
-        broadcast_card_bytes = live_broadcast(
-            match["tournament_name"],
-            match["match_no"],
-            map_name,
-            platform
-        ).getvalue()
-
-        sent = 0
-        failed = 0
-
-        for t_id, (team_info, uids) in team_recipients.items():
-            dm_embed = stream_live_dm_embed(
-                team_name=team_info["name"],
-                team_tag=team_info["tag"],
-                tournament_name=match["tournament_name"],
-                match_no=match["match_no"],
-                match_id=match_id,
-                map_name=map_name,
-                platform=platform,
-                stream_url=stream_url,
-                server_name=SERVER_NAME
-            )
-
-            for uid in uids:
-                user = interaction.guild.get_member(uid)
-                if not user:
-                    try:
-                        user = await self.bot.fetch_user(uid)
-                    except Exception:
-                        user = None
-
-                if user:
-                    try:
-                        await user.send(
-                            content=(
-                                f"🔴 **[ {SERVER_NAME} • WE ARE LIVE ]** 🔴\n"
-                                f"📡 **{team_info['name']} [{team_info['tag']}]**, Match #{match['match_no']} is streaming now!"
-                            ),
-                            embed=dm_embed,
-                            files=[discord.File(io.BytesIO(broadcast_card_bytes), filename="live_broadcast.png")],
-                            view=stream_link_view(stream_url, platform)
-                        )
-                        sent += 1
-                    except discord.Forbidden:
-                        failed += 1
-                    except Exception:
-                        failed += 1
-
-        broadcast_file = discord.File(
-            io.BytesIO(broadcast_card_bytes),
-            filename="live_broadcast.png"
-        )
-
-        embed = discord.Embed(
-            title=f"🔴 LIVE NOW — MATCH #{match['match_no']} IS STREAMING!",
-            description=(
-                f"```diff\n"
-                f"+ 🐺 {SERVER_NAME} • LIVE BROADCAST ACTIVE +\n"
-                f"```\n"
-                f"**{match['tournament_name']}** — Match **#{match['match_no']}** is now LIVE on **{platform}**!\n"
-                f"🔗 **[Watch the stream here]({stream_url})**"
-            ),
-            color=discord.Color.from_rgb(239, 68, 68),
-            timestamp=discord.utils.utcnow()
-        )
-        embed.set_image(url="attachment://live_broadcast.png")
-        embed.add_field(name="🏆 Tournament", value=f"**{match['tournament_name']}**", inline=True)
-        embed.add_field(name="🎮 Match Round", value=f"**Match #{match['match_no']}**", inline=True)
-        embed.add_field(name="🗺️ Map", value=f"**{map_name}**", inline=True)
-        embed.add_field(name="📡 Platform", value=f"**{platform}**", inline=True)
-        embed.add_field(name="🐺 Host", value=f"**{SERVER_NAME}**", inline=True)
-        embed.add_field(
-            name="📨 Broadcast Notification Report",
-            value=(
-                f"👥 Registered Squads: **{len(teams)}**\n"
-                f"✅ DMs Sent: **{sent}**"
-                + (f"\n⚠️ DMs Closed/Failed: **{failed}**" if failed > 0 else "")
-            ),
-            inline=False
-        )
-        embed.set_footer(text=f"🐺 {SERVER_NAME} • Live Broadcast Center")
-
-        # Prefer the server's configured announcement channel. If it is unset,
-        # deleted, or inaccessible, post where the command was invoked.
-        target_channel = interaction.channel
-        configured_channel_id = await get_setting("notification_channel_id")
-        if configured_channel_id and interaction.guild:
-            try:
-                target_channel = interaction.guild.get_channel(int(configured_channel_id))
-                if target_channel is None:
-                    target_channel = await interaction.guild.fetch_channel(int(configured_channel_id))
-            except (ValueError, discord.HTTPException, discord.Forbidden):
-                target_channel = interaction.channel
-
-        view = stream_link_view(stream_url, platform)
-        if target_channel and target_channel.id != interaction.channel_id:
-            await target_channel.send(embed=embed, file=broadcast_file, view=view)
-            await interaction.followup.send(
-                embed=ok(
-                    f"Live broadcast posted in {target_channel.mention}. "
-                    f"Sent **{sent}** member DM(s); **{failed}** failed."
-                ),
-                ephemeral=True
-            )
-        else:
-            await interaction.followup.send(
-                embed=embed,
-                file=broadcast_file,
-                view=view
-            )
+        await interaction.response.defer(ephemeral=True)
+        recipients, team_count = await stream_recipients(interaction.guild.id, match_id)
+        before = await get_stream(match_id)
+        row, changed = await start_stream(match_id, stream_url, platform.strip() or "YouTube", interaction.user.id,
+                                          rebroadcast=rebroadcast)
+        if not changed:
+            return await interaction.followup.send(embed=ok("This link is already LIVE. No duplicate announcements or DMs sent. Use /match streamstatus, or rebroadcast:true to explicitly resend."), ephemeral=True)
+        await update_stopped_announcement(interaction.guild, before)
+        image = await asyncio.to_thread(live_broadcast, row['tournament_name'], row['match_no'], row['map'] or 'TBA', row['stream_platform'])
+        image_bytes = image.getvalue()
+        # Publish first so a slow/blocked DM never holds up the public live link.
+        message, current = await post_announcement(interaction, row, image_bytes)
+        counts = await deliver_stream_dms(interaction.guild, row, recipients, image_bytes) if notify_players and current else {'sent': 0, 'failed': 0, 'skipped': len(recipients)}
+        await interaction.followup.send(embed=ok(f'Broadcast posted: {message.jump_url}\n'
+            f'{team_count} squads • {counts["sent"]} DMs sent • {counts["failed"]} failed • {counts["skipped"]} skipped.\n'
+            'Repeated identical live requests do not resend notifications. Counts are delivery attempts, not read receipts.'),
+            ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     # =========================================================
     # RESULT SUBMIT
@@ -1919,6 +1715,15 @@ class Esports(commands.Cog):
                 ephemeral=True
             )
 
+        try:
+            entrants = await match_teams(db, match, interaction.guild.id)
+        except Exception:
+            await db.close()
+            raise
+        if team_id not in {t['id'] for t in entrants} or placement > len(entrants):
+            await db.close()
+            return await interaction.response.send_message(embed=err("Use an actual fixture opponent and valid lobby placement."), ephemeral=True)
+
         pp, kp, total = calculate(
             placement,
             kills
@@ -1952,6 +1757,7 @@ class Esports(commands.Cog):
                 )
             )
 
+            await db.execute("UPDATE prediction_pools SET status='locked' WHERE match_id=? AND status='open'", (match_id,))
             await db.commit()
 
         except Exception:
@@ -2571,7 +2377,7 @@ class Esports(commands.Cog):
 
         embed = discord.Embed(
             title=f"🎓 Student Profile • {v['full_name']}",
-            description=f"Official verified student profile on **Root LU**.",
+            description="Official verified student profile on **Root LU**.",
             color=discord.Color.from_rgb(59, 130, 246),
             timestamp=discord.utils.utcnow()
         )
@@ -2677,22 +2483,24 @@ class Esports(commands.Cog):
         if tournament_id < 1:
             return await interaction.response.send_message(embed=err("Invalid tournament ID."), ephemeral=True)
         await interaction.response.defer()
-        db = await connect()
-        try:
-            cur = await db.execute("""SELECT tm.ign, t.name AS team, SUM(r.kills) AS kills
-                FROM results r JOIN matches m ON m.id=r.match_id
-                JOIN teams t ON t.id=r.team_id
-                JOIN team_members tm ON tm.team_id=t.id AND tm.is_sub=0
-                WHERE m.tournament_id=? AND r.verified=1
-                GROUP BY tm.id ORDER BY kills DESC, tm.ign ASC LIMIT 1""", (tournament_id,))
-            player = await cur.fetchone()
-        finally:
-            await db.close()
-        if not player:
-            return await interaction.followup.send(embed=err("No verified results yet."), ephemeral=True)
-        # Results track team kills, not individual kills; label the value accordingly.
-        await interaction.followup.send(file=discord.File(mvp(player['ign'], player['team'], player['kills']), filename="mvp.png"),
-                                        content="Featured player from the top-kill team; individual kills are not tracked.")
+        players = await top_fraggers(tournament_id, 1)
+        if not players:
+            return await interaction.followup.send(embed=err("No verified individual results yet. Staff can record them with /result player."), ephemeral=True)
+        player = players[0]
+        image = await asyncio.to_thread(mvp, player['ign'], player['team_name'], player['kills'])
+        await interaction.followup.send(file=discord.File(image, filename="mvp.png"),
+                                        content="MVP from verified individual results only; squad totals are not player kills.")
+
+    @result.command(name="player", description="Staff: record or correct verified individual kills and damage")
+    @app_commands.describe(member_id="Database roster member ID shown by /team roster")
+    async def player_result(self, interaction: discord.Interaction, match_id: app_commands.Range[int, 1],
+                            member_id: app_commands.Range[int, 1], kills: app_commands.Range[int, 0, 100],
+                            damage: app_commands.Range[int, 0, 100000] = 0):
+        if not await require_staff(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        result_id = await record_player_result(interaction.guild.id, match_id, member_id, kills, damage, interaction.user.id)
+        await interaction.followup.send(embed=ok(f"Verified individual result **#{result_id}** saved. Passport, MVP and radar now use this data."), ephemeral=True)
 
 
 # =============================================================
