@@ -2109,7 +2109,7 @@ class Esports(TournamentCog):
             inline=False
         )
 
-        embed.set_footer(text="🐺 Root LU • Leading University Tournament Center • Developed by Joy")
+        embed.set_footer(text=f"🐺 {SERVER_NAME} • Leading University Tournament Center • Developed by {DEVELOPER}")
         await interaction.response.send_message(embed=embed)
 
     @result.command(
@@ -2192,7 +2192,7 @@ class Esports(TournamentCog):
                 inline=False
             )
 
-        embed.set_footer(text="🐺 Root LU • Free Fire Esports Statistics • Developed by Joy")
+        embed.set_footer(text=f"🐺 {SERVER_NAME} • Free Fire Esports Statistics • Developed by {DEVELOPER}")
         await interaction.followup.send(embed=embed)
 
     @section.command(
@@ -2258,7 +2258,7 @@ class Esports(TournamentCog):
                 )
                 embed.add_field(name=title_line, value=value_line, inline=False)
 
-        embed.set_footer(text="🐺 Root LU • Leading University CSE Free Fire League • Developed by Joy")
+        embed.set_footer(text=f"🐺 {SERVER_NAME} • Leading University CSE Free Fire League • Developed by {DEVELOPER}")
         await interaction.followup.send(embed=embed)
 
     @student.command(
@@ -2399,7 +2399,7 @@ class Esports(TournamentCog):
         embed.add_field(name="📚 Batch & Section", value=f"**Batch {batch} (Sec {section})**", inline=True)
         embed.add_field(name="🛡️ Status", value="🟢 **VERIFIED STUDENT**", inline=True)
         embed.add_field(name="🐺 Community", value="**Root LU • Leading University**", inline=True)
-        embed.set_footer(text="🐺 Root LU • Official Student Verification System • Developed by Joy")
+        embed.set_footer(text=f"🐺 {SERVER_NAME} • Official Student Verification System • Developed by {DEVELOPER}")
 
         await interaction.response.send_message(embed=embed)
 
@@ -2466,7 +2466,7 @@ class Esports(TournamentCog):
             embed.add_field(name="🎮 Esports Teams", value="\n".join(team_lines), inline=False)
 
         embed.set_thumbnail(url=target.display_avatar.url)
-        embed.set_footer(text="🐺 Root LU • Leading University • Developed by Joy")
+        embed.set_footer(text=f"🐺 {SERVER_NAME} • Leading University • Developed by {DEVELOPER}")
         await interaction.response.send_message(embed=embed)
 
 

@@ -64,8 +64,6 @@ class EsportsBot(commands.Bot):
         ):
             await self.load_extension(ext)
             logger.info("Loaded extension: %s", ext)
-            await self.load_extension(ext)
-            logger.info("Loaded extension: %s", ext)
 
         if GUILD_ID:
             g = discord.Object(id=GUILD_ID)
