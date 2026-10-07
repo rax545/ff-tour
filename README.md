@@ -188,6 +188,38 @@ All graphics use a high-contrast cyberpunk/esports aesthetic and carry the **Roo
 | 16 | `generate_ultimate_player_card` | FUT-Style Ultimate Player Trading Card with OVR & 6 attributes (600×900) |
 | 17 | `generate_bounty_poster` | Cyberpunk "WANTED: DEAD OR ELIMINATED" Bounty Poster (900×1200) |
 
+### 🖼️ Sample renders (`docs/demo/`)
+
+Every generator above — plus the wolf crest icon — is committed as a rendered sample
+PNG under `docs/demo/` so server staff and reviewers can preview the full card set
+without starting the bot or Discord. The samples use **fake tournament data only**; no
+real player, student or Garena identity appears in them. Regenerate them anytime with:
+
+```bash
+python scripts/render_demo_cards.py
+```
+
+| File | Preview |
+|---|---|
+| `docs/demo/01-tournament-banner.png` | Tournament banner: prize pool, slots, entry fee, status |
+| `docs/demo/02-match-banner.png` | Match announcement with map & schedule |
+| `docs/demo/03-room-pass.png` | Personalized VIP room pass for a squad |
+| `docs/demo/04-points-table.png` | Full 12-team verified points table |
+| `docs/demo/05-booyah.png` | Booyah winner celebration card |
+| `docs/demo/06-mvp.png` | MVP of the match card |
+| `docs/demo/07-live-stream.png` | 720p live broadcast card |
+| `docs/demo/08-player-passport.png` | Cyberpunk gamer passport ID card |
+| `docs/demo/09-certificate.png` | Certificate of Esports Excellence |
+| `docs/demo/10-slotlist.png` | 12-slot lobby dropmap & grid |
+| `docs/demo/11-matchup-clash.png` | Head-to-head VERSUS clash poster |
+| `docs/demo/12-hall-of-fame.png` | All-time trophy cabinet |
+| `docs/demo/13-bracket.png` | Knockout bracket tree |
+| `docs/demo/14-killfeed.png` | Live combat kill feed ticker |
+| `docs/demo/15-lowerthird.png` | Broadcast lower-third news ticker |
+| `docs/demo/16-ultimate-player.png` | FUT-style ultimate player card (OVR + 6 attributes) |
+| `docs/demo/17-bounty-poster.png` | "WANTED: DEAD OR ELIMINATED" bounty poster |
+| `docs/demo/18-wolf-icon.png` | Wolf crest icon |
+
 ## 💰 Coin Economy, Bounties & Predictions
 
 - **Atomic ledger:** every balance change writes a `coins` upsert + `coin_transactions` audit row in one transaction.

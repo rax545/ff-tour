@@ -41,7 +41,7 @@ jobs:
       - name: Lint and syntax
         run: |
           python -m ruff check .
-          python -m compileall -q bot.py config.py cogs database services utils views tests
+          python -m compileall -q bot.py config.py cogs database services utils views tests scripts
       - name: Test without Discord credentials
         run: python -m unittest discover -s tests -v
       - name: Verify runtime data was not modified
